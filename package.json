@@ -1,0 +1,13 @@
+{
+  "name": "gemini-cu-skill-loop",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Failure-driven skill learning for Gemini 3.5 Flash Computer Use (visual/GUI modality). A small open-source adapter + skill loop. Builds on the EvoSkill idea (coding-agents only) and ports it to computer-use.",
+  "scripts": {
+    "demo": "node demo/mockRun.js"
+  },
+  "dependencies": {
+    "@google/genai": "^1.0.0",
+    "playwright": "^1.49.0"
+  }
+}
