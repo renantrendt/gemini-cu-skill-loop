@@ -1,3 +1,6 @@
 node_modules/
 skills.json
 .env
+.env.*
+package-lock.json
+STATUS.md
