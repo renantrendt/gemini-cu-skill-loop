@@ -61,7 +61,7 @@ helps and where it provably can't.
    intent** text and emits structured JSON skills
    (`{tag, title, note}`). The distillation call is **text-only** — see
    §3.7 and the screen recording at
-   [`docs/skill-distillation-arxiv23.mov`](docs/skill-distillation-arxiv23.mov)
+   [`docs/skill-reasoning.mov`](docs/skill-reasoning.mov)
    for the full input + streamed output.
 3. A **verified keep-gate**: a skill is persisted only if the retry that
    used it passes the benchmark's evaluator.
@@ -217,7 +217,7 @@ hand-rolled verifier.
    **The distillation call is text-only; no screenshots are passed in.**
    Output is a single JSON object `{tag, title, note}`. Prompt:
    [`src/distiller.js`](src/distiller.js). Evidence: the
-   [screen recording at `docs/skill-distillation-arxiv23.mov`](docs/skill-distillation-arxiv23.mov)
+   [screen recording at `docs/skill-reasoning.mov`](docs/skill-reasoning.mov)
    captures one full distillation end-to-end — input prompt + streamed
    chain-of-thought + emitted JSON skill — running in a fresh Terminal
    with no screenshots in scope.
