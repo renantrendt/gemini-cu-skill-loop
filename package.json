@@ -6,6 +6,7 @@
   "scripts": {
     "demo": "node demo/mockRun.js",
     "demo:live": "node --env-file-if-exists=.env demo/liveRun.js",
+    "demo:wv": "node --env-file-if-exists=.env demo/wvRun.js",
     "test": "node test/smoke.js"
   },
   "dependencies": {
