@@ -4,6 +4,8 @@
     "tag": "arxiv-search",
     "title": "Bypass Stubborn Date Range Inputs via URL Construction",
     "note": "ArXiv's advanced search date range fields can be highly resistant to standard selection and typing actions. Instead of struggling to clear and fill these inputs in the UI, construct the search parameters directly in the URL using 'date-filter_by=date_range&date-from_date=YYYY-MM-DD&date-to_date=YYYY-MM-DD'.",
+    "strategy_category": "url-construction",
+    "earnedIn": "Experiment A's distillation run (the original 'win' trace, MAX_RETRIES=2). Validated 3/3 on the §4.1 reproducibility re-rolls and on two held-out tasks (ArXiv--29, ArXiv--31).",
     "fromIntents": [
       "Navigate to Advanced Search to search for articles with specific criteria.",
       "Scroll down to see the advanced search form.",
@@ -46,5 +48,19 @@
       "Navigate directly to the search results with a wider date range.",
       "Search for 'autonomous vehicles' in EESS with all dates to check recent submissions."
     ]
+  },
+  {
+    "id": "wv-fullRecordedRun-iter3",
+    "tag": "arxiv-sort-and-count",
+    "title": "Counting Recent Publications via Sorted Results",
+    "note": "Instead of filtering by a strict date range which can return confusing empty results, search with a broader date filter (like 'Past 12 months'), sort the results by 'Submission date (newest first)', and manually count the papers matching the target date from the top of the list. If the first paper's date is older than the target date, the count is 0.",
+    "strategy_category": "scroll-and-read",
+    "branches": [
+      {
+        "if": "the results are not sorted by submission date",
+        "then": "Select 'Submission date (newest first)' from the 'Sort results by' dropdown and click 'Go'."
+      }
+    ],
+    "earnedIn": "Experiment C's iteration 3 (§5.4). Passed in 9 steps. Iters 1 (form-filling) and 2 (url-construction) failed; the strategy-category diversity prompt forced iter 3 into a third category. fullRecordedRun.js does not auto-persist to skills.json, so this skill is curated here by hand to widen the library's coverage of the arxiv-search task family."
   }
 ]

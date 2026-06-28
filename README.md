@@ -141,18 +141,48 @@ reproducible artifacts.
 
 ### 3.1 Loop overview
 
+Two views of the same system. **3.1a** is the per-attempt **agent
+loop** (one task run); **3.1b** is the **skill loop** (what happens
+across attempts when a baseline fails).
+
+**3.1a — Per-attempt agent loop** (with the two opt-in online
+interventions from §5.4 shown dashed):
+
 ```mermaid
 flowchart TD
-    A([Task goal]) --> B["Gemini 3.5 Flash Computer Use<br/>screenshot → action + intent → execute<br/><i>(Google's CU loop)</i>"]
-    B --> V{"Benchmark evaluator:<br/>pass?"}
-    V -- pass --> OK([Solved ✓])
-    V -- fail --> D["Distiller <i>(ours)</i><br/>failed trajectory + intents → skill"]
-    D --> R["Retry with skill in context"]
-    R --> V2{"Verified retry<br/>passes?"}
-    V2 -- yes --> K["Keep-gate <i>(ours)</i>: save skill"]
-    V2 -- no --> X["Discard skill — library stays clean<br/><i>(e.g. mechanics-bound ceiling: Apple--0)</i>"]
-    K --> G([Skill reused on held-out<br/>tasks in same family])
+    A([Task goal + any kept skills]) --> CU["Gemini 3.5 Flash Computer Use<br/>screenshot → functionCall (action + intent)<br/><i>(Google's CU loop)</i>"]
+    CU -. high-risk action only .-> POC["Pre-op Critic <i>(ours, opt-in)</i><br/>allow / block / correct"]
+    POC -. allow .-> EX
+    POC -. block .-> CU
+    CU --> EX["Execute action via Playwright<br/>capture next screenshot"]
+    EX --> CONT{Step budget left<br/>and model wants<br/>another action?}
+    CONT -- yes --> CU
+    CONT -- no, model says done --> CV["Completeness Verifier <i>(ours, opt-in)</i><br/>does the final answer<br/>contain the asked value?"]
+    CV -. incomplete + budget left .-> CU
+    CV -- complete or budget gone --> END([Final state →<br/>benchmark evaluator])
 ```
+
+**3.1b — Skill loop across attempts** (1+ iterations with category
+diversity; the verified keep-gate at the end):
+
+```mermaid
+flowchart TD
+    A([Task goal]) --> B["Run agent loop (3.1a)<br/>no skill in context"]
+    B --> V{"WebVoyager judge:<br/>pass?"}
+    V -- pass --> OK([Solved ✓ — no skill needed])
+    V -- fail --> D["Distiller k=1 <i>(ours)</i><br/>failed traj + intents + keyframe screenshots<br/>→ skill {tag, title, note, strategy_category, branches}"]
+    D --> R["Re-run agent loop (3.1a)<br/>with the new skill in context"]
+    R --> V2{"Verified retry<br/>passes?"}
+    V2 -- yes --> K["Keep-gate <i>(ours)</i>: persist skill to skills.json"]
+    V2 -- no, k &lt; MAX_ITERATIONS --> DV["Distiller k+1 <i>(ours)</i><br/>+ ALL prior rejected skills<br/>+ MUST use a different strategy_category<br/>(loop detector breaks basin-of-attraction)"]
+    DV --> R
+    V2 -- no, iters exhausted --> X["Discard all candidates<br/><i>(library stays clean — see Apple--0 ceiling)</i>"]
+    K --> G([Kept skill loaded on<br/>future tasks via substring tag-match])
+```
+
+§4.1 measures Experiment A (the *kept-skill reliability* line: K → G,
+re-rolled N=3). §5.4 measures Experiment C (the *single-shot
+convergence* line: B → D → R → DV → R loop, no pre-loaded skill).
 
 ### 3.2 Stack
 
@@ -586,6 +616,22 @@ skill was persisted.
 | 1 | `form-filling` | *Searching ArXiv by Specific Date* | NOT SUCCESS | 30 (cap) | ❌ |
 | 2 | `url-construction` | *Searching ArXiv via URL Construction* | NOT SUCCESS | 30 (cap) | ❌ |
 | 3 | `scroll-and-read` | *Counting Recent Publications via Sorted Results* | ✅ SUCCESS | 9 | ✅ **kept by gate** |
+
+#### Visualisation
+
+```mermaid
+xychart-beta
+    title "Experiment C — steps used per iteration. Iters 1-2 hit the 30-step cap; iter 3 passed in 9."
+    x-axis ["baseline", "iter 1 (form-filling)", "iter 2 (url-construction)", "iter 3 (scroll-and-read)"]
+    y-axis "Action steps" 0 --> 32
+    bar [30, 30, 30, 9]
+```
+
+*Each bar is one full agent run on the same task. iters 1-3 each have
+a different distilled skill in context. The drop from 30 to 9 at iter 3
+is the moment the loop detector's strategy-category diversity prompt
+forced the model out of the form-filling / url-construction basin into
+`scroll-and-read`, which happened to fit this task.*
 
 Final kept skill (full file
 [`distiller-iter3-skill.json`](demo/results/full-recorded-ArXiv--23/distiller-iter3-skill.json)):
