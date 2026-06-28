@@ -1,0 +1,6 @@
+{
+  "web_name": "GitHub",
+  "id": "GitHub--5",
+  "ques": "Find a Python repository on GitHub that has been updated in the past 2 days and has at least 500 stars.",
+  "web": "https://github.com/"
+}
