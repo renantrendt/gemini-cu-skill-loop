@@ -114,6 +114,57 @@ export const TASKS = [
     judgeWith: 'none',
     heldOutOf: 'gh-closed-issues',
   },
+  {
+    // Multi-filter sidebar task. CU agents typically struggle here:
+    // many similar-looking facet checkboxes, the relevant ones aren't
+    // visible without scrolling the sidebar, and the URL query syntax
+    // is non-obvious. Real failure mode reported across CU benchmarks.
+    id: 'hf-models-filter',
+    family: 'hf-filter',
+    goal: "On Hugging Face's models page, apply BOTH filters: task='text-generation' AND library='transformers'. Both filter facets must be selected.",
+    startUrl: 'https://huggingface.co/models',
+    check: {
+      urlMatches: /pipeline_tag=text-generation/,
+      custom: async (page) => /library=transformers/.test(page.url()),
+    },
+    judgeWith: 'none',
+    heldOutOf: null,
+  },
+  {
+    id: 'hf-models-filter-heldout',
+    family: 'hf-filter',
+    goal: "On Hugging Face's models page, apply BOTH filters: task='image-classification' AND library='pytorch'. Both filter facets must be selected.",
+    startUrl: 'https://huggingface.co/models',
+    check: {
+      urlMatches: /pipeline_tag=image-classification/,
+      custom: async (page) => /library=pytorch/.test(page.url()),
+    },
+    judgeWith: 'none',
+    heldOutOf: 'hf-models-filter',
+  },
+  {
+    // The 'Move' option lives inside a small 'More' (kebab/dropdown)
+    // menu next to the View history tab. Agents often miss it because
+    // it isn't visible without first opening the disclosure widget.
+    // Documented as a representative failure pattern in CUA benchmarks
+    // (hidden menus / disclosure widgets).
+    id: 'wiki-more-move',
+    family: 'wiki-more-menu',
+    goal: "On the Wikipedia article for 'Computer mouse', open the 'Move' page option (used to rename the article). This option lives in the 'More' dropdown menu near the View history tab.",
+    startUrl: 'https://en.wikipedia.org/wiki/Computer_mouse',
+    check: { urlContains: 'Special:MovePage' },
+    judgeWith: 'none',
+    heldOutOf: null,
+  },
+  {
+    id: 'wiki-more-move-heldout',
+    family: 'wiki-more-menu',
+    goal: "On the Wikipedia article for 'Bicycle', open the 'Move' page option (used to rename the article). This option lives in the 'More' dropdown menu near the View history tab.",
+    startUrl: 'https://en.wikipedia.org/wiki/Bicycle',
+    check: { urlContains: 'Special:MovePage' },
+    judgeWith: 'none',
+    heldOutOf: 'wiki-more-move',
+  },
 ];
 
 export function getTask(id) {
