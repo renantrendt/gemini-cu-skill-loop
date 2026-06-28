@@ -1,0 +1,18 @@
+An elegant and robust way to solve this is to avoid the fragile date-range filter entirely. When searching for very recent papers (like "yesterday"), a strict date filter often returns 0 results (especially on weekends or due to timezone/update delays), which confuses agents into thinking their search failed. 
+
+Instead, searching with a broader date range and sorting the results by submission date allows you to visually inspect and count the papers from the target date.
+
+```json
+{
+  "tag": "arxiv-sort-and-count",
+  "title": "Counting Recent Publications via Sorted Results",
+  "note": "Instead of filtering by a strict date range which can return confusing empty results, search with a broader date filter (like 'Past 12 months'), sort the results by 'Submission date (newest first)', and manually count the papers matching the target date from the top of the list. If the first paper's date is older than the target date, the count is 0.",
+  "strategy_category": "scroll-and-read",
+  "branches": [
+    {
+      "if": "the results are not sorted by submission date",
+      "then": "Select 'Submission date (newest first)' from the 'Sort results by' dropdown and click 'Go'."
+    }
+  ]
+}
+```

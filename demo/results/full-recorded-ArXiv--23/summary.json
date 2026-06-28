@@ -1,0 +1,84 @@
+{
+  "task": "ArXiv--23",
+  "goal": "Determine how many articles with the keyword 'autonomous vehicles' were published in the 'Electrical Engineering and Systems Science' section of ArXiv yesterday.",
+  "baseline": {
+    "passed": false,
+    "steps": 30,
+    "finalUrl": "https://arxiv.org/search/advanced?terms-0-operator=AND&terms-0-term=autonomous+vehicles&terms-0-field=all&classification-eess=y&classification-physics_archives=all&classification-include_cross_list=include&date-year=&date-filter_by=date_range&date-from_date=2026-06-27&date-to_date=2026-06-28&date-date_type=announced_date_first&abstracts=show&size=50&order=-announced_date_first"
+  },
+  "iterations": [
+    {
+      "iteration": 1,
+      "skill": {
+        "tag": "arxiv-date-search",
+        "title": "Searching ArXiv by Specific Date",
+        "note": "To search ArXiv for articles from a specific day, select 'Submission date (most recent)' because 'Announcement date' only supports year/month granularity. Enter the date in YYYY-MM-DD format in both 'From' and 'To' fields, check the relevant subject boxes, and click the 'Search' button at the very bottom of the page.",
+        "strategy_category": "form-filling",
+        "branches": [
+          {
+            "if": "the search requires day-level precision",
+            "then": "choose 'Submission date (most recent)' instead of 'Announcement date' which only supports year and month granularity"
+          }
+        ]
+      },
+      "retry": {
+        "passed": false,
+        "steps": 30,
+        "finalUrl": "https://arxiv.org/search/advanced?advanced=&terms-0-operator=AND&terms-0-term=autonomous+vehicles&terms-0-field=all&classification-eess=y&classification-physics_archives=all&classification-include_cross_list=include&date-filter_by=all_dates&date-year=&date-from_date=2026-06-27&date-to_date=2026-06-28&date-date_type=submitted_date&abstracts=show&size=50&order=-announced_date_first"
+      }
+    },
+    {
+      "iteration": 2,
+      "skill": {
+        "tag": "arxiv-url-search",
+        "title": "Searching ArXiv via URL Construction",
+        "note": "Bypass the complex ArXiv advanced search form by constructing a search URL directly. Use the format: `https://arxiv.org/search/advanced?advanced=&terms-0-operator=AND&terms-0-term=<query>&terms-0-field=all&classification-<subject>=y&date-filter_by=date_range&date-from_date=<YYYY-MM-DD>&date-to_date=<YYYY-MM-DD>&date-date_type=submitted_date` (e.g., use `electrical_engineering_systems` for EESS).",
+        "strategy_category": "url-construction"
+      },
+      "retry": {
+        "passed": false,
+        "steps": 30,
+        "finalUrl": "https://arxiv.org/search/advanced?advanced=&terms-0-operator=AND&terms-0-term=autonomous+vehicles&terms-0-field=all&classification-eess=y&classification-physics_archives=all&classification-include_cross_list=include&date-filter_by=all_dates&date-year=&date-from_date=2026-06-27&date-to_date=2026-06-28&date-date_type=submitted_date&abstracts=show&size=50&order=-announced_date_first"
+      }
+    },
+    {
+      "iteration": 3,
+      "skill": {
+        "tag": "arxiv-sort-and-count",
+        "title": "Counting Recent Publications via Sorted Results",
+        "note": "Instead of filtering by a strict date range which can return confusing empty results, search with a broader date filter (like 'Past 12 months'), sort the results by 'Submission date (newest first)', and manually count the papers matching the target date from the top of the list. If the first paper's date is older than the target date, the count is 0.",
+        "strategy_category": "scroll-and-read",
+        "branches": [
+          {
+            "if": "the results are not sorted by submission date",
+            "then": "Select 'Submission date (newest first)' from the 'Sort results by' dropdown and click 'Go'."
+          }
+        ]
+      },
+      "retry": {
+        "passed": true,
+        "steps": 9,
+        "finalUrl": "https://arxiv.org/search/advanced?advanced=&terms-0-operator=AND&terms-0-term=autonomous+vehicles&terms-0-field=all&classification-eess=y&classification-physics_archives=all&classification-include_cross_list=include&date-filter_by=past_12&date-year=&date-from_date=2026-06-27&date-to_date=2026-06-27&date-date_type=submitted_date&abstracts=show&size=50&order=-submitted_date"
+      }
+    }
+  ],
+  "kept": {
+    "tag": "arxiv-sort-and-count",
+    "title": "Counting Recent Publications via Sorted Results",
+    "note": "Instead of filtering by a strict date range which can return confusing empty results, search with a broader date filter (like 'Past 12 months'), sort the results by 'Submission date (newest first)', and manually count the papers matching the target date from the top of the list. If the first paper's date is older than the target date, the count is 0.",
+    "strategy_category": "scroll-and-read",
+    "branches": [
+      {
+        "if": "the results are not sorted by submission date",
+        "then": "Select 'Submission date (newest first)' from the 'Sort results by' dropdown and click 'Go'."
+      }
+    ]
+  },
+  "totalIterations": 3,
+  "categoriesTried": [
+    "form-filling",
+    "url-construction",
+    "scroll-and-read"
+  ],
+  "outcome": "SKILL_SAVED"
+}

@@ -1,0 +1,6 @@
+{
+  "tag": "arxiv-url-search",
+  "title": "Searching ArXiv via URL Construction",
+  "note": "Bypass the complex ArXiv advanced search form by constructing a search URL directly. Use the format: `https://arxiv.org/search/advanced?advanced=&terms-0-operator=AND&terms-0-term=<query>&terms-0-field=all&classification-<subject>=y&date-filter_by=date_range&date-from_date=<YYYY-MM-DD>&date-to_date=<YYYY-MM-DD>&date-date_type=submitted_date` (e.g., use `electrical_engineering_systems` for EESS).",
+  "strategy_category": "url-construction"
+}
