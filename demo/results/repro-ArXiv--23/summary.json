@@ -1,0 +1,40 @@
+{
+  "task": "ArXiv--23",
+  "n": 3,
+  "baseline": [
+    {
+      "passed": false,
+      "error": null,
+      "steps": 30
+    },
+    {
+      "passed": false,
+      "error": null,
+      "steps": 30
+    },
+    {
+      "passed": false,
+      "error": null,
+      "steps": 30
+    }
+  ],
+  "retry": [
+    {
+      "passed": true,
+      "error": null,
+      "steps": 29
+    },
+    {
+      "passed": true,
+      "error": null,
+      "steps": 24
+    },
+    {
+      "passed": true,
+      "error": null,
+      "steps": 19
+    }
+  ],
+  "baselinePassRate": "0/3",
+  "retryPassRate": "3/3"
+}
