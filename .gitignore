@@ -5,3 +5,5 @@ skills.json
 package-lock.json
 STATUS.md
 traces/
+webvoyager_data/
+.DS_Store
