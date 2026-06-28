@@ -9,6 +9,7 @@
     "demo:wv": "node --env-file-if-exists=.env demo/wvRun.js",
     "demo:repro": "node --env-file-if-exists=.env demo/reproducibility.js",
     "demo:recorded": "node --env-file-if-exists=.env demo/recordedRun.js",
+    "demo:fullRecordedRun": "node --env-file-if-exists=.env demo/fullRecordedRun.js",
     "test": "node test/smoke.js"
   },
   "dependencies": {

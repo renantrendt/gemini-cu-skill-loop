@@ -25,7 +25,7 @@
 //   HEADLESS=1        run chromium headless
 //   SAVE_RESULTS=1    write judge-facing artifact bundles to demo/results/<id>/
 //   SKILL_LOOP=1      on a triaged failure, run distill + retry
-//   MAX_STEPS=N       cap per-task step count (default 25)
+//   MAX_STEPS=N       cap per-task step count (default 30)
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'node:fs';
 import { GeminiComputerUse } from '../src/geminiCua.js';
@@ -43,7 +43,7 @@ if (!process.env.GEMINI_API_KEY) {
 const HEADLESS = !!process.env.HEADLESS;
 const SAVE_RESULTS = !!process.env.SAVE_RESULTS;
 const SKILL_LOOP = !!process.env.SKILL_LOOP;
-const MAX_STEPS = Number(process.env.MAX_STEPS ?? 25);
+const MAX_STEPS = Number(process.env.MAX_STEPS ?? 30);
 const MAX_RETRIES = Number(process.env.MAX_RETRIES ?? 1);
 const argId = process.argv[2];
 
