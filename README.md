@@ -249,6 +249,53 @@ hand-rolled verifier.
 5. Retrieval on future tasks: substring match on `tag` against the goal
    string ([`src/skillStore.js`](src/skillStore.js), `match()`).
 
+#### 3.7.1 Skill schema and how to use skills
+
+A skill is a small JSON object. The canonical schema is three fields;
+v2's iterative loop optionally adds two more.
+
+```json
+{
+  "tag": "arxiv-search",
+  "title": "Bypass Stubborn Date Range Inputs via URL Construction",
+  "note": "ArXiv's advanced search date range fields can be highly resistant to standard selection and typing actions. Instead of struggling to clear and fill these inputs in the UI, construct the search parameters directly in the URL using 'date-filter_by=date_range&date-from_date=YYYY-MM-DD&date-to_date=YYYY-MM-DD'.",
+
+  // optional (v2 iterative-loop only):
+  "strategy_category": "url-construction",
+  "branches": [
+    { "if": "URL params are ignored on first navigate", "then": "set order=-submitted_date explicitly" }
+  ]
+}
+```
+
+- `tag` — short kebab-case keyword; **matching is substring `goal.includes(tag)`** ([`src/skillStore.js:18-21`](src/skillStore.js#L18-L21)).
+- `title` — ≤10-word human-readable headline.
+- `note` — 1-3 sentences of concrete guidance; **this is what the agent reads** ([`src/geminiCua.js`](src/geminiCua.js), `_initialContents`).
+- `strategy_category` (v2) — one of `url-construction`, `form-filling`, `keyboard-shortcut`, `scroll-and-read`, `dom-extraction`, `menu-navigation`, `other`. Used by the loop detector to force category diversity across iterations.
+- `branches` (v2, optional) — guarded fallbacks for brittle widgets, à la CUA-Skill.
+
+Where skills live: **[`skills.json`](skills.json) at the project root**
+(gitignored to avoid committing user-specific data, but the project
+ships one with the proven `arxiv-search` skill). The store is a plain
+JSON array; you can hand-edit it.
+
+```bash
+# inspect the current skill library
+cat skills.json | python3 -m json.tool
+
+# clear the store (forces the next run to re-distill from scratch)
+echo '[]' > skills.json
+
+# hand-add a skill without going through the live loop
+cat >> skills.json <<'EOF'
+... edit by hand, valid JSON only
+EOF
+```
+
+The agent never modifies `skills.json` mid-run — only the keep-gate at
+the end of a successful retry calls `store.add(...)`. So manual edits
+are safe between runs.
+
 ### 3.8 Protocol — reproducibility
 
 For the headline reliability claim we ran a fixed-skill, fresh-process,
@@ -592,40 +639,118 @@ two-step nature of A's setup.
   (Claude / OpenAI) to remove same-family bias.
 - **Larger task fleet.** Sweep more WebVoyager families to populate the
   strategy-fixable vs mechanics-bound boundary with more data points.
+- **Skill adherence at the agent layer.** §5.4 surfaced this: even
+  when the iter-2 distiller wrote a correct URL-construction skill,
+  the agent's trajectory reverted to clicking the form inputs.
+  Mid-trajectory reflection ([Agent S2](https://arxiv.org/abs/2504.00906),
+  [OSCAR](https://arxiv.org/abs/2410.18963)) or DOM-grounded action
+  validation ([UI-TARS](https://arxiv.org/abs/2501.12326)) — neither
+  yet implemented here — is the canonical SOTA attack on this gap.
+- **Completeness-verifier calibration.** §5.4 also surfaced this: our
+  verifier returned `complete=true confidence=1` on an answer of
+  *"Click on sort dropdown"*. The likely fix is structured extraction
+  ("does the final text contain a specific numeric or named value?")
+  instead of free-form judgement on the screenshot.
+- **Publishing to npm.** Right now the only consumption path is
+  `git clone`. Once `src/*` has settled and we have at least one
+  external user's feedback, publish the core (CU adapter + skill loop
+  + verifier) as a versioned npm package. The repo itself stays the
+  primary deliverable for artifacts and reproduction.
 
 ---
 
 ## 7. Reproducibility
 
-### Quick start — no API key (smoke + control-flow mock)
+This project is **not published to npm**. It runs straight from the
+repo via `git clone`. The whole codebase is plain Node.js — no build
+step, no transpiler.
+
+### 7.1 Prerequisites
+
+- **Node.js ≥ 22** (we use `--env-file-if-exists`, added in Node 20+,
+  and tested on 23). `node -v` to check.
+- **macOS or Linux** with Chromium support. Tested on macOS 14
+  (Apple Silicon) and the Playwright bundled Chromium 1228.
+- **A Gemini API key** for any live run. Free tier from
+  https://aistudio.google.com/api-keys is sufficient for the §4.1
+  reproducibility (~$3) and the §5.4 iterative run (~$10–15).
+- **Disk**: ~500 MB for `node_modules` + Playwright Chromium binaries.
+
+### 7.2 First-time setup
 
 ```bash
+git clone https://github.com/renantrendt/gemini-cu-skill-loop.git
+cd gemini-cu-skill-loop
+
+# Install JS deps (playwright, @google/genai)
 npm install
-npm test              # offline unit smoke (denormalise, mock distiller, file:// Playwright)
-npm run demo          # mock model + mock UI; proves loop control flow
+
+# Install the *windowed* Chromium binary. npm install only fetches the
+# headless-shell variant; the headed variant is needed for screen
+# recordings (it's what shows up on your monitor).
+npx playwright install chromium
+
+# Pull WebVoyager tasks (642 of them) + reference answers (~250KB).
+./scripts/fetch-webvoyager.sh
+
+# Put your Gemini API key in .env (gitignored; mode 600).
+echo "GEMINI_API_KEY=AQ.your_key_here" > .env
+chmod 600 .env
 ```
 
-### Live run against Gemini 3.5 Flash CU + WebVoyager
+### 7.3 Quick start — no API key
 
 ```bash
-npm install
-npx playwright install chromium
-./scripts/fetch-webvoyager.sh        # pull WebVoyager tasks + reference answers
-export GEMINI_API_KEY=...            # https://aistudio.google.com/api-keys
+npm test       # offline unit smoke (denormalise, mock distiller, file:// Playwright)
+npm run demo   # mock model + mock UI; proves loop control flow end-to-end
+```
 
-# the win: ArXiv--23 fail -> distill -> verified retry -> held-outs
-HEADLESS=1 SAVE_RESULTS=1 SKILL_LOOP=1 MAX_STEPS=30 MAX_RETRIES=2 \
-  npm run demo:wv -- ArXiv--23
+### 7.4 Live runs against Gemini 3.5 Flash CU + WebVoyager
 
-# the reproducibility study used in §4.1 (N=3 each)
+```bash
+# Experiment A — reproducibility (§4.1) — 3 baseline + 3 retry, headless
 NODE_OPTIONS="--dns-result-order=ipv4first" \
   N=3 HEADLESS=1 SAVE_RESULTS=1 MAX_STEPS=30 \
   npm run demo:repro -- ArXiv--23
 
-# the ceiling
+# Experiment B — ceiling (§4.2) — Apple--0, full single-iteration loop
 HEADLESS=1 SAVE_RESULTS=1 SKILL_LOOP=1 MAX_STEPS=30 \
   npm run demo:wv -- Apple--0
+
+# Experiment C — iterative-loop convergence (§5.4) — 5 iterations,
+# strategy-category diversity, hybrid distiller, all online interventions on
+HEADLESS=1 SAVE_RESULTS=1 SKILL_LOOP=1 MAX_STEPS=30 MAX_RETRIES=5 \
+  COMPLETENESS_VERIFIER=1 PRE_OP_CRITIC=1 \
+  THINKING_LEVEL=HIGH DISTILL_THINKING_LEVEL=HIGH \
+  npm run demo:wv -- ArXiv--23
+
+# Experiment D — kept-skill headed demo (§4.1.x), Chromium visible
+# Requires a kept skill in skills.json (run A first, or hand-write one)
+HEADLESS=0 SAVE_RESULTS=1 npm run demo:recorded -- ArXiv--23
 ```
+
+### 7.5 Configuration knobs (env vars)
+
+| Variable | Default | Effect | Used in |
+|---|---|---|---|
+| `GEMINI_API_KEY` | — | Auth for the live SDK call (read from `.env` automatically). | all live runs |
+| `HEADLESS` | `0` | When `1`, Chromium runs hidden. | all |
+| `MAX_STEPS` | `30` | Per-task action budget. | wv runs |
+| `MAX_RETRIES` | `1` | Max distill/retry iterations of the skill loop. | `demo:wv` |
+| `MAX_ITERATIONS` | `3` | Same as `MAX_RETRIES` for the recorded-run path. | `demo:fullRecordedRun` |
+| `N` | `3` | Trials per condition for `demo:repro`. | repro |
+| `START_TRIAL` | `1` | Resume an existing repro batch (>1 = APPEND mode, no wipe). | repro |
+| `SAVE_RESULTS` | `0` | Write per-task artifact bundles to `demo/results/<id>/`. | all |
+| `SKILL_LOOP` | `0` | When `1`, on a triaged failure run distill→retry. | `demo:wv` |
+| `COMPLETENESS_VERIFIER` | `0` | VLAA-GUI verifier on `done`; injects critique and continues if incomplete. | runTask |
+| `PRE_OP_CRITIC` | `0` | Voyager-style critic before high-risk actions (Delete/Send/Submit/etc). | runTask |
+| `THINKING_LEVEL` | (Gemini default `MEDIUM`) | `MINIMAL` / `LOW` / `MEDIUM` / `HIGH` for the agent. | runTask |
+| `DISTILL_THINKING_LEVEL` | inherits `THINKING_LEVEL` | Same enum for distiller calls. | distiller |
+| `LIVE_TRACE` | `0` | Stream every Computer Use action + intent to stderr for visible-terminal narration. | runTask |
+| `CHROMIUM_PATH` | — | Path to the windowed Chromium binary (needed for `HEADLESS=0`). | playwrightEnv |
+| `WINDOW_X`, `WINDOW_Y` | `1280, 30` | Top-left of the agent's Chromium window on screen. | playwrightEnv (headed) |
+| `VIEWPORT_W`, `VIEWPORT_H` | `1280, 800` | Inner viewport size the model sees. | playwrightEnv |
+| `NODE_OPTIONS="--dns-result-order=ipv4first"` | — | Workaround for a Node 23 IPv6 hang against `generativelanguage.googleapis.com`. Set if you see `getaddrinfo ENOTFOUND`. | any |
 
 All artifacts (trajectories, distilled skills, judge reasoning,
 screenshots, per-trial summaries) land under
@@ -716,11 +841,56 @@ webvoyager_data/   Tasks + reference answers (gitignored; fetch script).
 - **SkillRL** — failure → lessons + skill library, RL-trained on
   embodied / web domains. arXiv 2602.08234.
   https://github.com/aiming-lab/SkillRL
+- **VLAA-GUI** — *Knowing When to Stop, Recover, and Search.* The
+  Completeness Verifier in §5.4's iterative loop is a direct port of
+  the on-`done` verifier from this paper. arXiv 2604.21375.
+  https://github.com/UCSC-VLAA/VLAA-GUI
+
+**On reflection and online supervision (informed §5.4's design).**
+- **ReAct** (Yao et al., 2022) — interleaved Thought-Action-Observation.
+  https://arxiv.org/abs/2210.03629
+- **Reflexion** (Shinn et al., 2023) — trajectory-level verbal
+  reflection feeding the next attempt.
+  https://arxiv.org/abs/2303.11366
+- **Voyager** (Wang et al., 2023) — self-verification critic +
+  growing skill library. The closest single antecedent to the verified
+  keep-gate. https://arxiv.org/abs/2305.16291
+- **Agent S2** (Simular, 2025) — Proactive Hierarchical Planning;
+  re-plans on subgoal boundary, not every step.
+  https://arxiv.org/abs/2504.00906
+- **OSCAR** (2024) — state-machine CU agent with dedicated re-plan
+  transitions on real-time exceptions.
+  https://arxiv.org/abs/2410.18963
+- **Mobile-Agent-v3 / GUI-Owl** (Alibaba, 2025) — Manager / Worker /
+  Reflector / Notetaker multi-agent roles; concurrent reflector that
+  interrupts on pop-ups and recurring screens.
+  https://arxiv.org/abs/2508.15144
+- **GUI-Reflection** (2025) — bakes reflection into the model via
+  pre-train + SFT + online reflection tuning.
+  https://arxiv.org/abs/2506.08012
+- **UI-TARS** (ByteDance, 2025) — DPO on positive/negative examples to
+  train inline reflection + recovery into the model itself.
+  https://arxiv.org/abs/2501.12326
+- **Anthropic "think" tool** — production guidance for pausing
+  mid-task after tool results.
+  https://www.anthropic.com/engineering/claude-think-tool
+- **GUI-Critic-R1** (2025) — pre-operative critic that scores a
+  proposed action *before* execution. The Pre-Op Critic in §5.4's
+  iterative loop borrows this pattern. https://arxiv.org/abs/2506.04614
+- **OS-Kairos** (2025) — confidence-gated escalation; the threshold
+  pattern we use for "only critic high-risk actions".
+  https://arxiv.org/abs/2503.16465
+- **EchoTrail-GUI** (2025) — textualised screenshots in critic /
+  reflector inputs. Motivates the hybrid distiller's keyframe-only
+  screenshot pass rather than full-trajectory frames.
+  https://arxiv.org/abs/2509.13405
 
 We do **not** claim novelty over these. The contribution is the narrow
 combination (failure-driven *and* GUI *and* training-free *and* wired to
 Gemini 3.5 Flash CU *and* verified keep-gate *and* fully reproducible),
-not a new learning algorithm.
+not a new learning algorithm. Where ideas above shaped specific code
+paths in this repo, we credit them inline in the module's source
+header.
 
 ---
 
