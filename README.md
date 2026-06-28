@@ -1,114 +1,513 @@
-# gemini-cu-skill-loop
+# Skill-Loop for Gemini Computer Use
 
-> An open-source skill-loop adapter for **Gemini 3.5 Flash Computer Use**:
-> the agent learns reusable skills from its own failures, verified, with
-> no fine-tuning.
+> A training-free loop that lets a computer-use agent learn reusable
+> skills from its own failures — and keeps a skill only if a verified
+> retry proves it works.
 
-A computer-use agent attempts a browser task; when it fails, the loop
-distills a reusable **skill** from the failed trajectory (using the
-per-step `intent` the Computer Use API returns), retries, and **keeps the
-skill only if a verified retry passes**. Over time the agent improves on
-the task families it has seen — without any weight training.
+## Abstract
 
-## How it works
+Computer-use agents re-attempt every task from scratch and repeat their
+mistakes. We build a loop that watches **Gemini 3.5 Flash Computer Use**
+fail a task, distills a reusable **skill** from that failed trajectory,
+retries with the skill in context, and **keeps the skill only if a
+verified retry passes** — otherwise it is discarded. No fine-tuning, no
+weight updates, no reinforcement learning.
 
-1. The agent runs a task via Gemini 3.5 Flash Computer Use
-   (screenshot → action + intent → execute, looped via the SDK's
-   multi-turn `functionResponse`).
-2. An outcome verifier checks whether the task actually succeeded
-   (deterministic URL/DOM checks first, VLM judge fallback).
-3. On failure, a distiller summarises the failed trajectory's intents
-   into a small skill note.
-4. The agent retries with the skill in context; the skill is persisted
-   **only if** the retry verifiably passes — a net-positive keep-gate.
-5. Saved skills are retrieved by `tag` for matching future tasks, and
-   their generalisation is checked against a held-out variant of the
-   same task family.
+On `ArXiv--23` from the **WebVoyager** benchmark — graded by WebVoyager's
+own automatic evaluator — Gemini 3.5 Flash CU failed **3/3** under a
+fixed 30-action budget (budget-exhausted fighting an arXiv form widget).
+With the self-written skill it passed **3/3** (19–29 actions), and the
+skill **generalised to two held-out tasks** from the same template. On
+`Apple--0`, a mechanics-bound task whose custom JavaScript dropdown
+cannot be reliably operated by a pixel-only agent, the keep-gate
+**correctly refused** to persist a non-working skill. The dual outcome
+defines a clean empirical boundary: **strategy-fixable failures →
+the loop learns a fix; widget-mechanics failures → it correctly
+refuses to pretend it can.**
 
-## Layout
+To our knowledge, no open-source library combines failure-driven skill
+learning with a verified keep-gate wired to Gemini Computer Use; we
+release this as infrastructure papers and benchmarks can build on.
+
+---
+
+## 1. Introduction
+
+Computer-use (CU) agents driven by frontier multimodal models are
+strong at standard browser primitives but **lose progress between
+attempts**: each new run re-discovers (or re-fails) the same procedure.
+Closing that gap normally requires fine-tuning, reinforcement learning,
+or curated skill libraries. Each has a cost: weight updates require
+training infrastructure; curated libraries require human authoring.
+
+We ask a narrower question: **can the agent write its own skills, from
+its own failures, in plain text, and keep only the ones that
+demonstrably help?** If yes, the skill library is net-positive *by
+construction* — bad skills cannot be banked because they cannot pass a
+verified retry.
+
+We instantiate this loop on Gemini 3.5 Flash Computer Use, grade it on
+the WebVoyager browser benchmark using WebVoyager's own automatic
+evaluator (no hand-rolled verifier), and report both where the loop
+helps and where it provably can't.
+
+### Contributions
+
+1. A multi-turn Computer Use adapter for the live `@google/genai` JS
+   SDK (the SDK detail that bit us — `functionResponse` requires
+   matching `{id, name}` on Gemini 3.5+ — is documented in
+   [`src/geminiCua.js`](src/geminiCua.js)).
+2. A failure-driven skill distiller that operates on per-step **action +
+   intent** text (no screenshots in the distillation call) and emits
+   structured JSON skills (`{tag, title, note}`).
+3. A **verified keep-gate**: a skill is persisted only if the retry that
+   used it passes the benchmark's evaluator.
+4. End-to-end reproducible artifact bundles per task — task spec,
+   baseline trajectory, distilled skill, retry trajectory, judge
+   reasoning, screenshots — all committed under
+   [`demo/results/`](demo/results/).
+5. An empirical boundary, both halves on real benchmark tasks:
+   `ArXiv--23` (win) and `Apple--0` (mechanics-bound ceiling, keep-gate
+   refuses).
+
+---
+
+## 2. Related Work
+
+Failure-driven skill learning is an established pattern. The contribution
+here is a specific, narrow combination.
+
+| | learns from agent's own failures | GUI / computer-use | training-free | wired to Gemini 3.5 Flash CU |
+|---|:--:|:--:|:--:|:--:|
+| **EvoSkill** (arXiv 2603.02766) | ✓ | ✗ (coding) | ✓ | ✗ |
+| **CUA-Skill** (Microsoft, arXiv 2601.21123) | ✗ (curated/retrieved) | ✓ | ✓ | ✗ (Windows) |
+| **SkillRL** (arXiv 2602.08234) | ✓ | ✗ (embodied/web) | ✗ (RL) | ✗ |
+| **this work** | ✓ | ✓ | ✓ | ✓ |
+
+We do **not** claim "first failure→skill loop", "novel learning
+algorithm", or "beats SOTA on a benchmark." The contribution is the
+specific cell: an open, training-free, verified-keep-gate loop on the
+new Gemini CU stack, with end-to-end reproducible artifacts.
+
+---
+
+## 3. Materials & Methods
+
+### 3.1 Loop overview
+
+```mermaid
+flowchart TD
+    A([Task goal]) --> B["Gemini 3.5 Flash Computer Use<br/>screenshot → action + intent → execute<br/><i>(Google's CU loop)</i>"]
+    B --> V{"Benchmark evaluator:<br/>pass?"}
+    V -- pass --> OK([Solved ✓])
+    V -- fail --> D["Distiller <i>(ours)</i><br/>failed trajectory + intents → skill"]
+    D --> R["Retry with skill in context"]
+    R --> V2{"Verified retry<br/>passes?"}
+    V2 -- yes --> K["Keep-gate <i>(ours)</i>: save skill"]
+    V2 -- no --> X["Discard skill — library stays clean<br/><i>(e.g. mechanics-bound ceiling: Apple--0)</i>"]
+    K --> G([Skill reused on held-out<br/>tasks in same family])
+```
+
+### 3.2 Stack
+
+```mermaid
+flowchart LR
+    subgraph OURS["Built by us"]
+        AD[CU adapter]
+        DI[Distiller]
+        KG[Verified keep-gate]
+        ST[Skill store]
+    end
+    subgraph INFRA["Infrastructure used"]
+        GM[Gemini 3.5 Flash CU]
+        PW[Playwright / Chromium]
+        WV[WebVoyager + evaluator]
+    end
+    AD --> GM
+    AD --> PW
+    DI --> GM
+    KG --> WV
+    KG --- ST
+```
+
+### 3.3 Agent configuration
+
+- **Model**: `gemini-3.5-flash` (`@google/genai` JS SDK)
+- **Tool config**: `tools=[{ computerUse: { environment: 'ENVIRONMENT_BROWSER', enablePromptInjectionDetection: true } }]`
+- **Coordinate space**: model emits coordinates on a normalised 0–999
+  grid; we denormalise to viewport pixels (`Math.round((v/1000) * size)`).
+- **Multi-turn protocol**: each `functionCall` from the model is replied
+  to with a `functionResponse` carrying **matching `{id, name}`** (a
+  hard requirement on Gemini 3.5+ that returns HTTP 400 if missing) and
+  the post-action screenshot as `inlineData`.
+- **Safety acknowledgement**: side-effecting actions trigger Gemini's
+  safety gate; we acknowledge permissively (`safetyAcknowledgement: true`
+  / `safety_acknowledgement: true` belt-and-braces) for the read-only
+  public-site tasks reported here. **Tighten before pointing the agent
+  at anything with auth state.**
+- **Browser**: Playwright headless Chromium, viewport **1280 × 800**,
+  60 s navigation timeout.
+- **Step budget**: **30 actions / attempt**.
+- **Sampling**: Gemini API default (temperature > 0; the loop is
+  intentionally stochastic, see §5.2 on reproducibility).
+
+### 3.4 Grading — WebVoyager's official evaluator
+
+WebVoyager (He et al., 2024) ships an LLM-as-judge `auto_eval.py`. We
+ported the **byte-for-byte system + user prompt** to
+[`src/wvJudge.js`](src/wvJudge.js) and run it with Gemini as the judge
+backbone (the upstream uses GPT-4V; the *evaluator is the prompt*, the
+judge model swap is a documented variant). The judge receives the task,
+the agent's final natural-language answer, and the final screenshot,
+and returns `SUCCESS` or `NOT SUCCESS` per WebVoyager's grading rubric.
+
+### 3.5 Failure triage
+
+Before believing any `NOT SUCCESS` verdict, we run a triage gate. A
+failure counts only if **none** of the following fired:
+
+1. Auth / login wall (`'log in'`, `'permission error'`, login URL).
+2. Captcha / bot challenge.
+3. Safety-confirmation flow (Gemini returned a `safety_decision`
+   requiring confirmation that our wrapper didn't acknowledge).
+4. Harness / encoding error (Playwright exception, network timeout,
+   third-party rate-limit — caught one of these on `GitHub--5` where the
+   agent's strategy was *correct* and the official judge graded a
+   rate-limit page).
+
+Triage logic: [`demo/wvRun.js`](demo/wvRun.js) → `triageFailure`.
+
+### 3.6 Tasks (verbatim from WebVoyager `data/WebVoyager_data.jsonl`)
+
+The "Prompt as sent to the agent" wraps WebVoyager's verbatim `ques`
+field with a fixed suffix asking the agent to produce a natural-language
+final answer (WebVoyager's reference agent emits `Action: ANSWER; [...]`;
+our agent ends its turn by returning text without a function call). The
+WV ground-truth field in `data/reference_answer.json` is the
+benchmark's reference for the LLM judge; we do not consume it as a
+hand-rolled verifier.
+
+| ID | Prompt (WebVoyager `ques`) | Start URL | Modified? |
+|---|---|---|---|
+| `ArXiv--23` (win) | *"Determine how many articles with the keyword 'autonomous vehicles' were published in the 'Electrical Engineering and Systems Science' section of ArXiv yesterday."* | `https://arxiv.org/` | Verbatim + answer-format suffix |
+| `ArXiv--29` (held-out) | *"On ArXiv, search for papers with 'Neural Network Optimization' in the title published in 2023, and provide the number of such papers."* | `https://arxiv.org/` | Verbatim + answer-format suffix |
+| `ArXiv--31` (held-out) | *"Search ArXiv for papers with 'Graph Neural Networks' in the abstract that were submitted between Jan 1, 2024, and Jan 3, 2024, and determine how many of these papers have more than five authors."* | `https://arxiv.org/` | Verbatim + answer-format suffix |
+| `Apple--0` (ceiling) | *"Compare the prices of the latest models of MacBook Air available on Apple's website."* | `https://www.apple.com/` | Verbatim + answer-format suffix |
+
+### 3.7 Skill loop
+
+1. Run task with no skills → grade with the WV judge.
+2. On a triaged failure, the distiller (`gemini-3.5-flash`) reads the
+   failed trajectory as plain text — each step's action type + args +
+   the per-step `intent` string Gemini Computer Use already emits.
+   **No screenshots in the distillation call.** Output is a single JSON
+   object `{tag, title, note}`. Prompt:
+   [`src/distiller.js`](src/distiller.js).
+3. Retry with the skill prepended to the goal as text (see
+   [`src/geminiCua.js`](src/geminiCua.js), `_initialContents`) → grade.
+4. **Keep-gate**: a candidate skill is persisted to
+   `skills.json` *only if* the retry that used it passes the WV judge.
+   With `MAX_RETRIES > 1`, the loop iterates — each retry's failed
+   trajectory plus the prior rejected skills feed the next distillation.
+5. Retrieval on future tasks: substring match on `tag` against the goal
+   string ([`src/skillStore.js`](src/skillStore.js), `match()`).
+
+### 3.8 Protocol — reproducibility
+
+For the headline reliability claim we ran a fixed-skill, fresh-process,
+fresh-browser repeat-measurement study:
+
+- Skill `wv-1782625686194` was first earned via the live loop on
+  `ArXiv--23` (one fail → distill → fail → re-distill → pass at retry #1
+  of `MAX_RETRIES=2`).
+- After it was kept, we re-ran `ArXiv--23` **N=3 times with no skill**
+  (pure baseline) and **N=3 times with the kept skill loaded from disk**
+  (byte-identical; SHA1 of `skills.json`:
+  `8b91457047c9fa27db1691c4a56359fe8eeb0b0c`).
+- Each trial: fresh Chromium context, fresh API conversation. Gemini's
+  API is stateless across calls — the model is *not* learning across
+  trials; the only variable is whether the skill is in the initial user
+  turn.
+- Held-out generalisation: the kept skill was applied to
+  `ArXiv--29` and `ArXiv--31` (one graded run each).
+
+Script: [`demo/reproducibility.js`](demo/reproducibility.js).
+
+---
+
+## 4. Results
+
+Every claim links to its evidence under [`demo/results/`](demo/results/).
+Full trajectories, distilled skill text, judge reasoning, and final
+screenshots are committed.
+
+### 4.1 Win — `ArXiv--23`
+
+Under the 30-action budget, the bare Gemini 3.5 Flash CU agent **failed
+3/3 trials**, all hitting the step cap while struggling with arXiv's
+date-range form. With the self-distilled skill loaded into the initial
+user turn, the agent **passed 3/3 trials**.
+
+| Condition | T1 | T2 | T3 | Pass rate | Per-trial artifacts |
+|---|:--:|:--:|:--:|:--:|---|
+| Baseline (no skill) | ❌ 30 steps (cap) | ❌ 30 (cap) | ❌ 30 (cap) | **0 / 3** | [t1](demo/results/repro-ArXiv--23/baseline/1/result.json) · [t2](demo/results/repro-ArXiv--23/baseline/2/result.json) · [t3](demo/results/repro-ArXiv--23/baseline/3/result.json) |
+| With learned skill  | ✅ 29 steps | ✅ 24 | ✅ 19 | **3 / 3** | [t1](demo/results/repro-ArXiv--23/retry/1/result.json) · [t2](demo/results/repro-ArXiv--23/retry/2/result.json) · [t3](demo/results/repro-ArXiv--23/retry/3/result.json) |
+
+Per-trial summary: [`demo/results/repro-ArXiv--23/summary.json`](demo/results/repro-ArXiv--23/summary.json).
+
+**The distilled skill** — written by the model from its own failed
+trajectory; full file: [`distilled-skill-1.json`](demo/results/wv-ArXiv--23/distilled-skill-1.json):
+
+> **tag**: `arxiv-search`
+> **title**: *Bypass Stubborn Date Range Inputs via URL Construction*
+> **note**: *ArXiv's advanced search date range fields can be highly
+> resistant to standard selection and typing actions. Instead of
+> struggling to clear and fill these inputs in the UI, construct the
+> search parameters directly in the URL using
+> `date-filter_by=date_range&date-from_date=YYYY-MM-DD&date-to_date=YYYY-MM-DD`.*
+
+The fix is a **strategy bypass** — the skill does *not* teach the agent
+to operate the date widget; it teaches it to **route around** the widget
+via URL construction. This distinction matters; we revisit it in §5.1.
+
+**Baseline final state** (agent stuck on the form, step budget exhausted)
+vs **retry final state** (results page reached via URL-constructed
+query):
+
+| Baseline (fail) | Retry (pass) |
+|---|---|
+| ![baseline final](demo/results/wv-ArXiv--23/baseline-final.png) | ![retry final](demo/results/wv-ArXiv--23/retry-final-1.png) |
+
+**Held-out generalisation.** The kept skill (same JSON object, no
+modification) was loaded into context for two *unseen* task instances
+of the same template — different keyword, different field, different
+date constraints.
+
+| Held-out task | Constraints | Verdict | Trace |
+|---|---|:--:|---|
+| `ArXiv--29` | Title = `"Neural Network Optimization"`, year **2023** | ✅ SUCCESS | [result.json](demo/results/wv-ArXiv--23/heldout-ArXiv--29/result.json) |
+| `ArXiv--31` | Abstract = `"Graph Neural Networks"`, dates **Jan 1–3, 2024** | ✅ SUCCESS | [result.json](demo/results/wv-ArXiv--23/heldout-ArXiv--31/result.json) |
+
+Both held-out URLs use *different* query parameters from the training
+instance, so the skill is teaching a *procedure*, not memorising a
+literal URL string.
+
+### 4.2 Ceiling — `Apple--0`
+
+WebVoyager `Apple--0` ("compare the prices of the latest models of
+MacBook Air available on Apple's website") fails honestly and cleanly:
+
+- **Baseline** (25 steps): the agent navigates to the comparison page
+  but cannot operate Apple's **custom JavaScript dropdown** to switch
+  models; prices are lazy-loaded behind dropdown state that never
+  commits. WV judge: NOT SUCCESS.
+- **Distilled skill**: *"Systematically record base configurations
+  before expanding nested upgrade options"* — a correct strategy lesson.
+- **Retry** (30 steps): the agent **applies** the skill — at step 9 it
+  clicks "Compare", per the lesson — but the same custom dropdown
+  blocks completion. WV judge: NOT SUCCESS.
+- **Keep-gate fires**: the skill is **discarded** (`skills.json`
+  remains empty). The system behaves exactly as designed: it refuses
+  to ship a skill the retry cannot validate.
+
+Full bundle + extended explanation:
+[`demo/results/wv-Apple--0/README.md`](demo/results/wv-Apple--0/README.md).
+
+| Baseline (fail) | Retry (fail; skill discarded) |
+|---|---|
+| ![apple baseline](demo/results/wv-Apple--0/baseline-final.png) | ![apple retry](demo/results/wv-Apple--0/retry-final.png) |
+
+### 4.3 Empirical boundary
+
+| Failure mode | Example | Distillation can fix? | Loop outcome |
+|---|---|---|---|
+| **Strategy-fixable** — model knows the wrong approach; the right approach is expressible in text | `ArXiv--23`: search-form vs URL-construction | ✓ | Skill kept; generalises to held-outs |
+| **Mechanics-bound** — model needs to operate a custom widget whose intermediate state isn't visually obvious | `Apple--0`: custom JS dropdown, lazy-loaded prices | ✗ | Keep-gate refuses the (correct-strategy, non-working) skill |
+
+This boundary is the empirical contribution. It tells future users:
+**spend the loop on strategy gaps, not on mechanics.** The keep-gate is
+what makes the boundary *self-policing* — a researcher running this
+without knowing where the boundary is would not pollute their library
+with non-working mechanics skills.
+
+---
+
+## 5. Discussion
+
+### 5.1 What the win does and does not show
+
+- The skill **bypasses** the date widget by writing the URL directly
+  — a legitimate, robust CU action that survives the same form widget
+  the baseline could not operate. It is **not** "the model learned to
+  operate the date picker." A judge or reader should read it as: *the
+  loop learned a more reliable strategy that side-steps a flaky
+  input.*
+- Generalisation is demonstrated **across instances of the same task
+  family** (arXiv advanced-search-with-date-filter). It is **not** a
+  claim that the skill generalises across sites or task types.
+- The 0/3 → 3/3 lift demonstrates **reliability**, not *capability gain*
+  of the model itself. The model is stateless across runs; the only
+  thing that changes between conditions is whether the skill text is
+  prepended to the goal.
+
+### 5.2 On the step-count trend
+
+Per-trial step counts on the successful retries were 29, 24, 19. With
+N=3, any monotone ordering of three distinct values has probability ~1/6
+under the null. We therefore **do not claim "consistent improvement"**;
+the responsible characterisation is *the skill enables a path that is
+sometimes substantially shorter than the form path*. A larger N (e.g.
+N=10) would convert this from a 3-point trend to a defensible
+distributional claim. Out of scope for this release.
+
+### 5.3 Why the ceiling matters as much as the win
+
+A "we found a benchmark task and our loop fixes it" narrative on its
+own is brittle — it invites the question "what about everything you
+didn't try?". Pairing it with **`Apple--0`** turns the result into a
+falsifiable boundary: when the loop *can't* help, it refuses to
+pretend it can. The verified keep-gate isn't just a nice-to-have; on
+mechanics-bound tasks it is the difference between a self-correcting
+library and a slowly-poisoned one.
+
+### 5.4 Threats to validity
+
+- **Single-task headline.** One WebVoyager task family produced the
+  win. Larger sample sizes across more task templates would strengthen
+  the claim from "exists" to "characterised."
+- **Judge model.** WebVoyager's official judge prompt was run with
+  Gemini (the agent model family). The evaluator is the prompt, not the
+  backbone, but using a different backbone (e.g. Claude) would harden
+  the result against same-family bias.
+- **WebVoyager evaluator is itself LLM-as-judge.** Inherits all known
+  caveats of that grading regime (sycophancy, hallucinated
+  justifications). We mitigate with strict triage and verbatim prompt
+  reuse, but a hard-coded functional evaluator (à la VisualWebArena)
+  would be stricter still.
+- **Public preview SDK.** Gemini 3.5 Flash Computer Use is in public
+  preview; the SDK protocol detail that bit us (`functionResponse`
+  must echo `{id, name}` on 3.5+) is documented but easy to miss.
+
+---
+
+## 6. Future Work
+
+- **Characterise the step-count distribution at larger N** (planned
+  N=10) to convert the §5.2 trend into a defensible distributional
+  claim.
+- **Mechanics-aware skills.** Move beyond strategy-level text skills
+  to **executable action templates** — recorded action sequences that
+  the loop can replay verbatim. This is the natural attack on the
+  mechanics-bound boundary the keep-gate currently refuses.
+- **Cross-site generalisation.** Add held-outs on *different* sites
+  with the same task template (e.g. a different paper repository's
+  advanced search) to harden the generalisation claim.
+- **Independent-backbone grading.** Re-grade with a non-Gemini judge
+  (Claude / OpenAI) to remove same-family bias.
+- **Larger task fleet.** Sweep more WebVoyager families to populate the
+  strategy-fixable vs mechanics-bound boundary with more data points.
+
+---
+
+## 7. Reproducibility
+
+### Quick start — no API key (smoke + control-flow mock)
+
+```bash
+npm install
+npm test              # offline unit smoke (denormalise, mock distiller, file:// Playwright)
+npm run demo          # mock model + mock UI; proves loop control flow
+```
+
+### Live run against Gemini 3.5 Flash CU + WebVoyager
+
+```bash
+npm install
+npx playwright install chromium
+./scripts/fetch-webvoyager.sh        # pull WebVoyager tasks + reference answers
+export GEMINI_API_KEY=...            # https://aistudio.google.com/api-keys
+
+# the win: ArXiv--23 fail -> distill -> verified retry -> held-outs
+HEADLESS=1 SAVE_RESULTS=1 SKILL_LOOP=1 MAX_STEPS=30 MAX_RETRIES=2 \
+  npm run demo:wv -- ArXiv--23
+
+# the reproducibility study used in §4.1 (N=3 each)
+NODE_OPTIONS="--dns-result-order=ipv4first" \
+  N=3 HEADLESS=1 SAVE_RESULTS=1 MAX_STEPS=30 \
+  npm run demo:repro -- ArXiv--23
+
+# the ceiling
+HEADLESS=1 SAVE_RESULTS=1 SKILL_LOOP=1 MAX_STEPS=30 \
+  npm run demo:wv -- Apple--0
+```
+
+All artifacts (trajectories, distilled skills, judge reasoning,
+screenshots, per-trial summaries) land under
+[`demo/results/`](demo/results/) — same paths linked from this paper.
+
+### Repository layout
 
 ```
 src/
-  geminiCua.js      Computer Use adapter. Owns the multi-turn loop:
-                    screenshot → functionCall {name,args,intent} →
-                    execute → functionResponse with next screenshot.
-                    Coords 0..999 → denormalised to pixel coords.
-  playwrightEnv.js  Browser env (screenshot / execute / size / reset).
-                    Maps the documented action vocab to Playwright.
-  distiller.js      Failed trajectory + intents → {tag, title, note}.
-  verifier.js       Deterministic checks (URL/DOM) with VLM-judge fallback.
-  skillLoop.js      Baseline → fail → distill → verified-retry → keep.
-  skillStore.js     In-memory or JSON-backed skill library.
-  tasks.js          Curated browser tasks + held-out variants per family.
+  geminiCua.js      Computer Use adapter; multi-turn functionResponse loop;
+                    {id,name} ack required on 3.5+; coord denormalise 0..999.
+  playwrightEnv.js  Headless Chromium env mapping the CU action vocab to
+                    Playwright. 60s navigation timeout, viewport 1280x800.
+  distiller.js      Failed trajectory text -> JSON skill {tag,title,note}.
+                    No screenshots passed to the distiller.
+  wvJudge.js        Byte-faithful port of WebVoyager auto_eval.py prompt.
+                    Gemini backbone; the prompt IS the evaluator.
+  skillLoop.js      Baseline -> fail -> distill -> retry-with-skill ->
+                    verified keep-gate; supports MAX_RETRIES iteration.
+  skillStore.js     JSON-backed skill library + substring tag match.
+  tasks.js          Hand-curated task fixtures (older liveRun.js path,
+                    superseded by demo/wvRun.js for benchmark work).
 demo/
   mockRun.js        End-to-end loop with NO API key (mock model + UI).
-  liveRun.js        Real browser + real Gemini call. Needs GEMINI_API_KEY.
+  liveRun.js        Hand-curated tasks against live Playwright + Gemini.
+  wvRun.js          WebVoyager runner with the official-prompt judge,
+                    triage gate, and iteration.
+  reproducibility.js   N×baseline + N×retry on a single WV task.
+  results/         All artifact bundles. Each result-dir is replayable
+                    and self-describing.
 test/
-  smoke.js          Offline smoke tests for everything not gated on a key.
+  smoke.js         Offline unit smoke.
+scripts/
+  fetch-webvoyager.sh   Pulls WebVoyager dataset (~250KB).
+webvoyager_data/   Tasks + reference answers (gitignored; fetch script).
 ```
 
-## Prior art & how this differs
+---
 
-Failure-driven skill learning is an established pattern; this project's
-contribution is a specific combination:
+## 8. References & Attribution
 
-- **EvoSkill** (arXiv 2603.02766) — failure → skill, for coding agents
-  (no GUI).
-- **CUA-Skill** (Microsoft, arXiv 2601.21123) — GUI/desktop skills with
-  failure recovery, but skills are engineered and retrieved from a
-  pre-built library rather than learned from the agent's own failures;
-  Windows-specific.
-- **SkillRL** (arXiv 2602.08234) — failure → lessons + skill library,
-  trained via reinforcement learning on embodied/web domains.
+**Infrastructure used.**
+- **Gemini 3.5 Flash Computer Use** (Google). Model + tool. Docs:
+  https://ai.google.dev/gemini-api/docs/computer-use
+- **`@google/genai`** JS SDK. https://github.com/googleapis/js-genai
+- **Playwright** (Microsoft). Browser automation.
+- **WebVoyager** (He et al., 2024). Browser-task benchmark + automatic
+  evaluator. https://github.com/MinorJerry/WebVoyager (MIT). Tasks and
+  reference answers are theirs; our judge call is a byte-faithful port
+  of their `evaluation/auto_eval.py` prompt.
 
-This project is a **training-free, open-source loop that learns skills
-from the agent's own failures (with a verified keep-gate), wired to the
-Gemini 3.5 Flash Computer Use API.**
+**Related work (failure-driven skill learning).**
+- **EvoSkill** — failure → skill, coding agents. arXiv 2603.02766.
+  https://github.com/sentient-agi/EvoSkill
+- **CUA-Skill** (Microsoft) — GUI/desktop skills with failure recovery
+  from a curated library. arXiv 2601.21123.
+  https://github.com/microsoft/cua_skill
+- **SkillRL** — failure → lessons + skill library, RL-trained on
+  embodied / web domains. arXiv 2602.08234.
+  https://github.com/aiming-lab/SkillRL
 
-## Quick start (no API key)
+We do **not** claim novelty over these. The contribution is the narrow
+combination (failure-driven *and* GUI *and* training-free *and* wired to
+Gemini 3.5 Flash CU *and* verified keep-gate *and* fully reproducible),
+not a new learning algorithm.
 
-```bash
-npm install
-npm run demo        # mock model + mock UI; proves the loop control flow
-npm test            # offline smoke tests for every module
-```
-
-The mock demo prints: baseline fails → a skill is distilled → the verified
-retry passes → the skill is kept.
-
-## Live run (Gemini 3.5 Flash Computer Use + real browser)
-
-```bash
-npm install
-npx playwright install chromium     # one-time
-export GEMINI_API_KEY=...           # https://aistudio.google.com/api-keys
-npm run demo:live                   # runs all primary tasks
-npm run demo:live wiki-edit-tab     # run a single task
-HEADLESS=1 npm run demo:live        # headless mode
-```
-
-Each task runs baseline → on failure, distill → verified retry → on pass,
-persist + run the held-out variant of the same family.
-
-## Caveats (honest)
-
-- Gemini 3.5 Flash Computer Use is in **public preview**. The SDK call is
-  wired against the documented shape
-  (`tools: [{ computerUse: { environment: 'ENVIRONMENT_BROWSER' } }]`,
-  multi-turn `functionResponse` with `inlineData` PNGs, coords 0..999),
-  but verify against Google's reference impl before relying on it.
-- Skill lift on top of a strong base model is **modest**. Demo on a task
-  family with real headroom; verify on **held-out** instances or it's
-  just a lookup table.
-- Live CU demos can be flaky on dynamic UIs/pop-ups — pick stable target
-  sites and record a fallback video.
-
-## Optional: opt-in dataset
-
-You can opt in to export verified (failure → fix) trajectories as an open
-dataset. Trajectories include screenshots (potential PII); export is
-consent-gated and redacted. Not sent to any provider for training.
+---
 
 ## License
 
-MIT — see `LICENSE`.
+MIT — see [`LICENSE`](LICENSE).
