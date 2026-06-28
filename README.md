@@ -273,6 +273,30 @@ user turn, the agent **passed 3/3 trials**.
 
 Per-trial summary: [`demo/results/repro-ArXiv--23/summary.json`](demo/results/repro-ArXiv--23/summary.json).
 
+#### Visualisation
+
+```mermaid
+xychart-beta
+    title "ArXiv--23 — pass count over 3 trials per condition"
+    x-axis ["baseline (no skill)", "retry (with kept skill)"]
+    y-axis "Trials passed (out of 3)" 0 --> 3
+    bar [0, 3]
+```
+
+```mermaid
+xychart-beta
+    title "Steps used per trial — baseline always hit the 30-step cap; retry completed earlier"
+    x-axis ["trial 1", "trial 2", "trial 3"]
+    y-axis "Action steps" 0 --> 32
+    line [30, 30, 30]
+    line [29, 24, 19]
+```
+
+*Top flat line: baseline (no skill) — all three trials hit the 30-step
+cap without producing an answer. Bottom declining line: retry (with the
+kept skill) — 29, 24, 19 steps. The decline is suggestive but N=3 is
+too small to call it a trend; see [§5.2](#52-on-the-step-count-trend).*
+
 **The distilled skill** — written by the model from its own failed
 trajectory; full file: [`distilled-skill-1.json`](demo/results/wv-ArXiv--23/distilled-skill-1.json):
 
