@@ -67,6 +67,53 @@ export const TASKS = [
     judgeWith: 'none',
     heldOutOf: 'gh-stargazers',
   },
+  {
+    // Harder family: the target lives inside Wikipedia's collapsed
+    // sidebar "Tools" menu. CU agents commonly fail because the link
+    // is hidden behind a disclosure widget; the skill teaches "open the
+    // Tools menu in the left sidebar first".
+    id: 'wiki-cite-page',
+    family: 'wiki-tools-sidebar',
+    goal: "On the Wikipedia article for 'Computer mouse', open the 'Cite this page' tool to get a citation for this article.",
+    startUrl: 'https://en.wikipedia.org/wiki/Computer_mouse',
+    check: { urlContains: 'Special:CiteThisPage' },
+    judgeWith: 'none',
+    heldOutOf: null,
+  },
+  {
+    id: 'wiki-cite-page-heldout',
+    family: 'wiki-tools-sidebar',
+    goal: "On the Wikipedia article for 'Bicycle', open the 'Cite this page' tool to get a citation for this article.",
+    startUrl: 'https://en.wikipedia.org/wiki/Bicycle',
+    check: { urlContains: 'Special:CiteThisPage' },
+    judgeWith: 'none',
+    heldOutOf: 'wiki-cite-page',
+  },
+  {
+    // Hidden-filter task: agents often default to the visible "Issues"
+    // tab and forget that the closed-only view requires editing the
+    // search box query (or clicking the small 'Closed' counter link).
+    id: 'gh-closed-issues',
+    family: 'gh-filter',
+    goal: "On the GitHub repo page for microsoft/playwright, filter the issues list to show ONLY closed issues.",
+    startUrl: 'https://github.com/microsoft/playwright/issues',
+    check: {
+      urlMatches: /(is|state)(%3A|:|=)closed/i,
+    },
+    judgeWith: 'none',
+    heldOutOf: null,
+  },
+  {
+    id: 'gh-closed-issues-heldout',
+    family: 'gh-filter',
+    goal: "On the GitHub repo page for vercel/next.js, filter the issues list to show ONLY closed issues.",
+    startUrl: 'https://github.com/vercel/next.js/issues',
+    check: {
+      urlMatches: /(is|state)(%3A|:|=)closed/i,
+    },
+    judgeWith: 'none',
+    heldOutOf: 'gh-closed-issues',
+  },
 ];
 
 export function getTask(id) {

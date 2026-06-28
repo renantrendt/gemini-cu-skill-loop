@@ -16,6 +16,7 @@
 //   4) If the family has a held-out task, run it with the learned skill
 //      to check that the skill generalises (not just memorises).
 
+import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { GeminiComputerUse } from '../src/geminiCua.js';
 import { SkillStore } from '../src/skillStore.js';
 import { runWithSkillLearning } from '../src/skillLoop.js';
@@ -23,6 +24,15 @@ import { createBrowserEnv } from '../src/playwrightEnv.js';
 import { createDistiller } from '../src/distiller.js';
 import { createVerifier } from '../src/verifier.js';
 import { TASKS, primaryTasks, heldOutFor, getTask } from '../src/tasks.js';
+
+const TRACE = !!process.env.TRACE;
+if (TRACE && !existsSync('./traces')) mkdirSync('./traces');
+const traceWrite = (task, label, data) => {
+  if (!TRACE) return;
+  const path = `./traces/${task}-${label}-${Date.now()}.json`;
+  writeFileSync(path, JSON.stringify(data, null, 2));
+  console.log('  trace ->', path);
+};
 
 if (!process.env.GEMINI_API_KEY) {
   console.error(
@@ -39,7 +49,12 @@ const targets = argTaskId
   : primaryTasks();
 
 const store = new SkillStore({ path: './skills.json' });
-const distill = createDistiller();
+const tracedDistiller = createDistiller();
+const distill = async (args) => {
+  const skill = await tracedDistiller(args);
+  if (TRACE) console.log('  distilled:', skill.tag, '-', skill.title);
+  return skill;
+};
 const agent = new GeminiComputerUse({ environment: 'browser' });
 
 const results = [];
@@ -67,6 +82,14 @@ for (const task of targets) {
     console.log(
       `baseline=${res.passedBaseline} afterSkill=${res.passedAfterSkill} attempts=${res.attempts}`
     );
+    if (TRACE) {
+      const finalUrl = env.currentUrl ? env.currentUrl() : '?';
+      console.log('  final URL:', finalUrl);
+      const finalShot = await env.screenshot();
+      const shotPath = `./traces/${task.id}-final-${Date.now()}.png`;
+      writeFileSync(shotPath, Buffer.from(finalShot, 'base64'));
+      console.log('  screenshot ->', shotPath);
+    }
     if (res.skillLearned) {
       console.log(`learned: [${res.skillLearned.tag}] ${res.skillLearned.title}`);
     }
