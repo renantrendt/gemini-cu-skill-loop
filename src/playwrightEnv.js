@@ -16,8 +16,24 @@ export async function createBrowserEnv({
   startUrl = 'about:blank',
   viewport = DEFAULT_VIEWPORT,
   slowMo = 0,
+  // For the side-by-side recording: position the Chromium window so it
+  // sits next to the trace-streaming Terminal. {x,y} are screen coords;
+  // when set, --window-position and --window-size are passed to chromium.
+  windowPosition = null,
 } = {}) {
-  const browser = await chromium.launch({ headless, slowMo });
+  const launchArgs = [];
+  if (windowPosition && !headless) {
+    launchArgs.push(`--window-position=${windowPosition.x},${windowPosition.y}`);
+    launchArgs.push(`--window-size=${viewport.width},${viewport.height}`);
+  }
+  // In headed mode we need the FULL chromium binary; the cache also holds
+  // the headless-shell variant which Playwright may pick by default and
+  // which renders no visible window.
+  const launchOpts = { headless, slowMo, args: launchArgs };
+  if (!headless && process.env.CHROMIUM_PATH) {
+    launchOpts.executablePath = process.env.CHROMIUM_PATH;
+  }
+  const browser = await chromium.launch(launchOpts);
   const context = await browser.newContext({ viewport });
   const page = await context.newPage();
   // Heavy sites (Apple, Booking) routinely exceed the 30s default; 60s

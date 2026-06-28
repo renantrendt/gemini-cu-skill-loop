@@ -31,6 +31,11 @@ const N = Number(process.env.N ?? 3);
 const HEADLESS = !!process.env.HEADLESS;
 const SAVE_RESULTS = !!process.env.SAVE_RESULTS;
 const MAX_STEPS = Number(process.env.MAX_STEPS ?? 30);
+// START_TRIAL: 1-indexed trial number to start from. Default 1 = fresh
+// run (wipes the output dir). N>=2 = APPEND mode (preserves existing
+// trials, appends new ones starting at START_TRIAL).
+const START_TRIAL = Number(process.env.START_TRIAL ?? 1);
+const APPEND_MODE = START_TRIAL > 1;
 const argId = process.argv[2];
 if (!argId) {
   console.error('usage: node demo/reproducibility.js <task-id>');
@@ -74,7 +79,8 @@ const agent = new GeminiComputerUse({ environment: 'browser' });
 
 const outRoot = `./demo/results/repro-${argId}`;
 if (SAVE_RESULTS) {
-  if (existsSync(outRoot)) rmSync(outRoot, { recursive: true, force: true });
+  if (!APPEND_MODE && existsSync(outRoot))
+    rmSync(outRoot, { recursive: true, force: true });
   mkdirSync(outRoot, { recursive: true });
 }
 
@@ -140,34 +146,46 @@ async function runOnce({ skills, label, trial }) {
 
 const results = { baseline: [], retry: [] };
 
-for (let i = 1; i <= N; i++) {
-  console.log(`\n--- baseline ${i}/${N} (no skill) ---`);
+const last = START_TRIAL + N - 1; // inclusive last trial number to run
+const label = APPEND_MODE ? `(append trials ${START_TRIAL}..${last})` : `(trials 1..${N})`;
+console.log(`Plan: ${N} baseline + ${N} retry trials ${label}`);
+
+for (let i = START_TRIAL; i <= last; i++) {
+  console.log(`\n--- baseline ${i} (no skill) ---`);
   const r = await runOnce({ skills: [], label: 'baseline', trial: i });
   results.baseline.push(r);
   console.log(`  passed=${r.passed}  steps=${r.steps}  ${r.error ? '(err: ' + r.error.slice(0, 80) + ')' : ''}`);
 }
 
-for (let i = 1; i <= N; i++) {
-  console.log(`\n--- retry ${i}/${N} (with ${matchedSkills.length} skill) ---`);
+for (let i = START_TRIAL; i <= last; i++) {
+  console.log(`\n--- retry ${i} (with ${matchedSkills.length} skill) ---`);
   const r = await runOnce({ skills: matchedSkills, label: 'retry', trial: i });
   results.retry.push(r);
   console.log(`  passed=${r.passed}  steps=${r.steps}  ${r.error ? '(err: ' + r.error.slice(0, 80) + ')' : ''}`);
 }
 
 const rate = (rs) => rs.filter((r) => r.passed).length;
-console.log('\n=== reproducibility summary ===');
+console.log('\n=== this run summary ===');
 console.log(`task            : ${argId}`);
-console.log(`baseline pass   : ${rate(results.baseline)} / ${N}`);
-console.log(`retry pass      : ${rate(results.retry)} / ${N}`);
+console.log(`baseline pass   : ${rate(results.baseline)} / ${N}  (trials ${START_TRIAL}..${last})`);
+console.log(`retry pass      : ${rate(results.retry)} / ${N}  (trials ${START_TRIAL}..${last})`);
 console.log(`lift            : +${rate(results.retry) - rate(results.baseline)} / ${N}`);
 
 if (SAVE_RESULTS) {
+  // In append mode, don't overwrite summary.json (it was for the prior
+  // batch). Write a per-batch file instead so we can aggregate later.
+  const summaryPath = APPEND_MODE
+    ? `${outRoot}/summary-trials-${START_TRIAL}-${last}.json`
+    : `${outRoot}/summary.json`;
   writeFileSync(
-    `${outRoot}/summary.json`,
+    summaryPath,
     JSON.stringify(
       {
         task: argId,
         n: N,
+        startTrial: START_TRIAL,
+        endTrial: last,
+        appendMode: APPEND_MODE,
         baseline: results.baseline,
         retry: results.retry,
         baselinePassRate: `${rate(results.baseline)}/${N}`,
