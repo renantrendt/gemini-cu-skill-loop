@@ -87,7 +87,7 @@ cover a subset:
 |---|:--:|:--:|:--:|:--:|:--:|
 | [EvoSkill](https://github.com/sentient-agi/EvoSkill) (arXiv 2603.02766) | ✅ | ✅ | ✅ | ❌ (coding) | ❌ |
 | [CUA-Skill](https://github.com/microsoft/cua_skill) (arXiv 2601.21123) | ❌ (curated) | ~ (recovery) | ✅ | ✅ | ❌ (Windows) |
-| [SkillRL](https://github.com/aiming-lab/SkillRL) (arXiv 2602.08234) | ✅ | ~ | ❌ (RL) | ❌ (embodied/web) | ❌ |
+| [SkillRL](https://github.com/aiming-lab/SkillRL) (arXiv 2602.08234) | ✅ | ~ (RL-coupled) | ❌ (RL) | ❌ (embodied/web) | ❌ |
 | [VLAA-GUI](https://github.com/UCSC-VLAA/VLAA-GUI) | ❌ (recovery) | ✅ | ✅ | ✅ | ❌ (planner only) |
 | **this project** | ✅ | ✅ | ✅ | ✅ | ✅ |
 
