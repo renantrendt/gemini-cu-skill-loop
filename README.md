@@ -13,17 +13,28 @@ retries with the skill in context, and **keeps the skill only if a
 verified retry passes** — otherwise it is discarded. No fine-tuning, no
 weight updates, no reinforcement learning.
 
-On `ArXiv--23` from the **WebVoyager** benchmark — graded by WebVoyager's
-own automatic evaluator — Gemini 3.5 Flash CU failed **3/3** under a
-fixed 30-action budget (budget-exhausted fighting an arXiv form widget).
-With the self-written skill it passed **3/3** (19–29 actions), and the
-skill **generalised to two held-out tasks** from the same template. On
-`Apple--0`, a mechanics-bound task whose custom JavaScript dropdown
-cannot be reliably operated by a pixel-only agent, the keep-gate
-**correctly refused** to persist a non-working skill. The dual outcome
-defines a clean empirical boundary: **strategy-fixable failures →
-the loop learns a fix; widget-mechanics failures → it correctly
-refuses to pretend it can.**
+**We measure two distinct things and keep their results separate.**
+First, the **reliability of a kept skill**: on `ArXiv--23` from the
+**WebVoyager** benchmark — graded by WebVoyager's own automatic
+evaluator — Gemini 3.5 Flash CU failed **3/3** under a fixed 30-action
+budget (budget-exhausted fighting an arXiv form widget); with the
+**kept skill loaded byte-identically into context** the agent passed
+**3/3** (19–29 actions), and the same kept skill **generalised to two
+held-out tasks** from the same template (1 graded run each). Second,
+the **boundary of where distillation can help**: on `Apple--0`, a
+mechanics-bound task whose custom JavaScript dropdown cannot be reliably
+operated by a pixel-only agent, the keep-gate **correctly refused** to
+persist a non-working skill. The combined empirical map: **strategy-
+fixable failures → the loop learns a fix; widget-mechanics failures →
+it correctly refuses to pretend it can.**
+
+A separate experiment (§5.4) running the **full live loop from
+scratch** — fresh distillation at every iteration, no pre-loaded skill
+— produced three strategy-different skills in three iterations but did
+**not** converge to a passing skill in that take. The verified keep-
+gate persisted nothing. That is a *different* claim about the same
+loop — single-shot convergence of the live distillation, not reliability
+of a kept skill. We report both honestly.
 
 To our knowledge, no open-source library combines failure-driven skill
 learning with a verified keep-gate wired to Gemini Computer Use; we
@@ -59,10 +70,13 @@ helps and where it provably can't.
    [`src/geminiCua.js`](src/geminiCua.js)).
 2. A failure-driven skill distiller that operates on per-step **action +
    intent** text and emits structured JSON skills
-   (`{tag, title, note}`). The distillation call is **text-only** — see
-   §3.7 and the screen recording at
-   [`docs/skill-reasoning.mov`](docs/skill-reasoning.mov)
-   for the full input + streamed output.
+   (`{tag, title, note}`). The canonical [`src/distiller.js`](src/distiller.js)
+   call is **text-only** — see §3.7 and the screen recording at
+   [`docs/skill-reasoning.mov`](docs/skill-reasoning.mov). A hybrid
+   variant used by §5.4's iterative-loop recording adds final-state +
+   last-failure-state screenshots to the same prompt (per the
+   EchoTrail-GUI keyframe pattern). Text-only stays the default; visual
+   is opt-in.
 3. A **verified keep-gate**: a skill is persisted only if the retry that
    used it passes the benchmark's evaluator.
 4. End-to-end reproducible artifact bundles per task — task spec,
@@ -214,13 +228,18 @@ hand-rolled verifier.
 2. On a triaged failure, the distiller (`gemini-3.5-flash`) reads the
    failed trajectory as plain text — each step's action type + args +
    the per-step `intent` string Gemini Computer Use already emits.
-   **The distillation call is text-only; no screenshots are passed in.**
-   Output is a single JSON object `{tag, title, note}`. Prompt:
+   The **canonical distillation call** used by §4.1's reproducibility
+   study is **text-only; no screenshots are passed in.** Output is a
+   single JSON object `{tag, title, note}`. Prompt:
    [`src/distiller.js`](src/distiller.js). Evidence: the
    [screen recording at `docs/skill-reasoning.mov`](docs/skill-reasoning.mov)
    captures one full distillation end-to-end — input prompt + streamed
    chain-of-thought + emitted JSON skill — running in a fresh Terminal
-   with no screenshots in scope.
+   with no screenshots in scope. A **hybrid variant** used by §5.4's
+   iterative-loop recording extends the same prompt with two keyframe
+   screenshots (final state of the failed attempt, plus the prior
+   retry's final state on iter ≥ 2); see
+   [`demo/fullRecordedRun.js`](demo/fullRecordedRun.js).
 3. Retry with the skill prepended to the goal as text (see
    [`src/geminiCua.js`](src/geminiCua.js), `_initialContents`) → grade.
 4. **Keep-gate**: a candidate skill is persisted to
@@ -259,12 +278,40 @@ Every claim links to its evidence under [`demo/results/`](demo/results/).
 Full trajectories, distilled skill text, judge reasoning, and final
 screenshots are committed.
 
-### 4.1 Win — `ArXiv--23`
+### 4.0 Experiments at a glance
 
-Under the 30-action budget, the bare Gemini 3.5 Flash CU agent **failed
-3/3 trials**, all hitting the step cap while struggling with arXiv's
-date-range form. With the self-distilled skill loaded into the initial
-user turn, the agent **passed 3/3 trials**.
+This project measures **three different things** and reports each one
+separately. The Results section below covers the first two; §5.4 covers
+the third. They are not interchangeable.
+
+| | Experiment | What it measures | Skill source | N | Result | Artifacts |
+|---|---|---|---|---|---|---|
+| **A** | Reproducibility on `ArXiv--23` (§4.1) | Reliability of a kept skill under re-rolls | Pre-validated kept skill loaded from `skills.json` (byte-identical across trials) | 3 baseline + 3 retry | baseline **0/3**, retry **3/3** | [`demo/results/repro-ArXiv--23/`](demo/results/repro-ArXiv--23/) |
+| **A′** | Held-out generalisation (§4.1) | Does the kept skill work on unseen instances of the same task family | Same kept skill from `skills.json` | 1 graded run each on `ArXiv--29`, `ArXiv--31` | ✅ ✅ (both pass) | [`heldout-ArXiv--29/`](demo/results/wv-ArXiv--23/heldout-ArXiv--29/), [`heldout-ArXiv--31/`](demo/results/wv-ArXiv--23/heldout-ArXiv--31/) |
+| **B** | Ceiling on `Apple--0` (§4.2) | Where strategy-level distillation can*not* help | Live distill-then-retry | 1 fail, 1 distill, 1 retry-fail | retry FAIL → keep-gate refuses skill | [`demo/results/wv-Apple--0/`](demo/results/wv-Apple--0/) |
+| **C** | Iterative-loop convergence (§5.4) | Single-shot convergence of the *full live loop* (fresh distillation each iteration, no pre-loaded skill) | Fresh distillation at every iteration, prior rejected skills forbidden from same `strategy_category` | 1 baseline + 3 iterations | baseline FAIL + 3 retry FAIL; keep-gate persists nothing | [`demo/results/full-recorded-ArXiv--23/`](demo/results/full-recorded-ArXiv--23/) |
+| **D** | Kept-skill headed recording | Same kept skill as A, but on a *visible Chromium* for the demo video | Same kept skill from `skills.json` | 1 baseline + 1 retry | baseline FAIL (30 steps), retry **PASS** (19 steps) | [`demo/results/recorded-ArXiv--23/`](demo/results/recorded-ArXiv--23/) |
+
+A/A′/D are *the same skill* — Experiment A measures it under repetition,
+A′ measures it on unseen instances, D records it on a visible browser
+for the video. Experiment C is a *different experiment* on the same task
+that runs the distillation loop from scratch — and measures a different
+property (convergence under live stochastic distillation).
+
+### 4.1 Reliability of a kept skill — `ArXiv--23` (Experiment A)
+
+This experiment measures **reliability** of an already-distilled skill,
+not single-shot convergence of the live loop. The skill was earned in a
+separate live run (§3.8 protocol). For the reproducibility study we re-ran
+the task **N=3 times with no skill in context** (pure baseline) and **N=3
+times with the same kept skill loaded byte-identically from
+`skills.json`**. Gemini's API is stateless across calls — the model is
+not learning across trials; the only variable is whether the skill text
+is in the initial user turn.
+
+Under the 30-action budget, the bare agent **failed 3/3 trials**, all
+hitting the step cap while struggling with arXiv's date-range form.
+With the kept skill loaded, the agent **passed 3/3 trials**.
 
 | Condition | T1 | T2 | T3 | Pass rate | Per-trial artifacts |
 |---|:--:|:--:|:--:|:--:|---|
@@ -334,7 +381,26 @@ Both held-out URLs use *different* query parameters from the training
 instance, so the skill is teaching a *procedure*, not memorising a
 literal URL string.
 
-### 4.2 Ceiling — `Apple--0`
+#### Same result on a headed Chromium (Experiment D)
+
+For the demo video we re-ran *just one* trial of Experiment A's retry
+condition with the browser window visible on screen rather than
+headless. The exact same kept skill, same task, viewport-mirrored
+Chromium positioned by the user.
+
+| Phase | Steps | Verdict | Final answer |
+|---|---|---|---|
+| Baseline (no skill) | 30 | ❌ NOT SUCCESS | budget-exhausted on form |
+| Retry (kept skill) | 19 | ✅ **SUCCESS** | *"Yesterday, June 27, 2026, there were 0 articles with the keyword 'autonomous vehicles' published in the 'Electrical Engineering and Systems Science' section of ArXiv."* |
+
+Step 17 of the retry: `navigate — Navigate to search results sorted by
+newest submission date` — the agent issuing the constructed URL.
+Step 18: the natural-language answer. Both fully consistent with the
+N=3 reproducibility above. Artifacts: [`demo/results/recorded-ArXiv--23/`](demo/results/recorded-ArXiv--23/).
+The raw recording (32 MB, ~6 min) lives locally on the recorder's
+Desktop; a trimmed version will land in `docs/` for the demo video.
+
+### 4.2 Ceiling — `Apple--0` (Experiment B)
 
 WebVoyager `Apple--0` ("compare the prices of the latest models of
 MacBook Air available on Apple's website") fails honestly and cleanly:
@@ -376,8 +442,13 @@ with non-working mechanics skills.
 
 ## 5. Discussion
 
-### 5.1 What the win does and does not show
+### 5.1 What the §4.1 result does and does not show
 
+- §4.1's 0/3 → 3/3 lift demonstrates **reliability of a kept skill**,
+  not "the live loop solved this in one shot." The skill was earned in
+  a prior run; §4.1 re-uses it. Conflating those is the most common
+  misreading; we keep them in different experiments (A vs C in §4.0)
+  on purpose.
 - The skill **bypasses** the date widget by writing the URL directly
   — a legitimate, robust CU action that survives the same form widget
   the baseline could not operate. It is **not** "the model learned to
@@ -387,9 +458,9 @@ with non-working mechanics skills.
 - Generalisation is demonstrated **across instances of the same task
   family** (arXiv advanced-search-with-date-filter). It is **not** a
   claim that the skill generalises across sites or task types.
-- The 0/3 → 3/3 lift demonstrates **reliability**, not *capability gain*
-  of the model itself. The model is stateless across runs; the only
-  thing that changes between conditions is whether the skill text is
+- Reliability is a claim about the *model+skill* combination under
+  re-rolls. The model itself is stateless across runs; the only thing
+  that changes between conditions is whether the skill text is
   prepended to the goal.
 
 ### 5.2 On the step-count trend
@@ -412,13 +483,21 @@ pretend it can. The verified keep-gate isn't just a nice-to-have; on
 mechanics-bound tasks it is the difference between a self-correcting
 library and a slowly-poisoned one.
 
-### 5.5 Iterative loop — what diversity bought us and what it didn't
+### 5.4 Iterative-loop convergence — Experiment C (`ArXiv--23`)
 
-A second recorded run on the same `ArXiv--23` task, with **5-iteration
-loop**, **strategy-category diversity prompt**, **completeness verifier
-on `done`**, **pre-operative critic on high-risk actions**, **hybrid
-distiller with screenshots**, and **`HIGH` thinking on both agent and
-distiller**. Full bundle: [`demo/results/full-recorded-ArXiv--23/`](demo/results/full-recorded-ArXiv--23/).
+**This is a different experiment from §4.1.** §4.1 measures
+*reliability of a kept skill*. This subsection measures *single-shot
+convergence of the full live loop*: no pre-loaded skill, fresh
+distillation at every iteration, max 5 iterations, the verified
+keep-gate decides what (if anything) gets saved at the end. The two
+experiments live side-by-side because they answer different questions
+about the same loop on the same task.
+
+Configuration on the v2 run: **5-iteration loop**, **strategy-category
+diversity prompt**, **completeness verifier on `done`**, **pre-operative
+critic on high-risk actions**, **hybrid distiller with screenshots**,
+and **`HIGH` thinking on both agent and distiller**. Full bundle:
+[`demo/results/full-recorded-ArXiv--23/`](demo/results/full-recorded-ArXiv--23/).
 Recording (88 MB, 12 m) lives locally on the recorder's Desktop, not
 committed.
 
@@ -468,7 +547,16 @@ mid-trajectory reflection ([Agent S2](https://arxiv.org/abs/2504.00906),
 and DOM-grounded action validation ([UI-TARS](https://arxiv.org/abs/2501.12326)),
 which we did not yet implement.
 
-### 5.4 Threats to validity
+**The §4.1 and §5.4 results are complementary, not contradictory.**
+Experiment A says a *kept* skill reliably lifts pass rate 0/3 → 3/3.
+Experiment C says a *fresh-from-baseline* distillation didn't converge
+in 3 iterations on this take. Both can be true at once: the kept skill
+itself was earned in a different, separately-recorded live run (the
+distillation captured in [`docs/skill-reasoning.mov`](docs/skill-reasoning.mov)),
+which is exactly why we keep the §3.8 protocol explicit about the
+two-step nature of A's setup.
+
+### 5.5 Threats to validity
 
 - **Single-task headline.** One WebVoyager task family produced the
   win. Larger sample sizes across more task templates would strengthen
