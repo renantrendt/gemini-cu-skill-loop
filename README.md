@@ -699,9 +699,12 @@ re-rolls.
 
 ## 7. Reproducibility
 
-This project is **not published to npm**. It runs straight from the
-repo via `git clone`. The whole codebase is plain Node.js — no build
-step, no transpiler.
+This project **uses `npm` as the Node.js package manager** (`npm install`
+to fetch dependencies, `npm run <script>` to invoke the entries in
+[`package.json`](package.json)). It is **not published to the npm
+registry as a package** — there is no `npm install gemini-cu-skill-loop`
+consumption path; you clone the repo and run it. Plain Node.js
+codebase: no build step, no transpiler.
 
 ### 7.1 Prerequisites
 
