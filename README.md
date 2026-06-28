@@ -293,7 +293,7 @@ v2's iterative loop optionally adds two more.
 }
 ```
 
-- `tag` — short kebab-case keyword; **matching is substring `goal.includes(tag)`** ([`src/skillStore.js:18-21`](src/skillStore.js#L18-L21)).
+- `tag` — short kebab-case keyword; **matching is substring `goal.includes(tag)`** (see `match()` in [`src/skillStore.js`](src/skillStore.js)).
 - `title` — ≤10-word human-readable headline.
 - `note` — 1-3 sentences of concrete guidance; **this is what the agent reads** ([`src/geminiCua.js`](src/geminiCua.js), `_initialContents`).
 - `strategy_category` (v2) — one of `url-construction`, `form-filling`, `keyboard-shortcut`, `scroll-and-read`, `dom-extraction`, `menu-navigation`, `other`. Used by the loop detector to force category diversity across iterations.
@@ -826,29 +826,125 @@ secrets needed.
 
 ### Repository layout
 
+Every committed source/script file is listed here; if it's in the repo,
+it's documented; if it's documented, it exists.
+
 ```
-src/
-  geminiCua.js      Computer Use adapter; multi-turn functionResponse loop;
-                    {id,name} ack required on 3.5+; coord denormalise 0..999.
-  playwrightEnv.js  Headless Chromium env mapping the CU action vocab to
-                    Playwright. 60s navigation timeout, viewport 1280x800.
-  distiller.js      Failed trajectory text -> JSON skill {tag,title,note}.
-                    (Distillation call is text-only; see README §3.7.)
-  wvJudge.js        Byte-faithful port of WebVoyager auto_eval.py prompt.
-                    Gemini backbone; the prompt IS the evaluator.
-  skillLoop.js      Baseline -> fail -> distill -> retry-with-skill ->
-                    verified keep-gate; supports MAX_RETRIES iteration.
-  skillStore.js     JSON-backed skill library + substring tag match.
-  tasks.js          Hand-curated task fixtures (older liveRun.js path,
-                    superseded by demo/wvRun.js for benchmark work).
-demo/
-  mockRun.js        End-to-end loop with NO API key (mock model + UI).
-  liveRun.js        Hand-curated tasks against live Playwright + Gemini.
-  wvRun.js          WebVoyager runner with the official-prompt judge,
-                    triage gate, and iteration.
-  reproducibility.js   N×baseline + N×retry on a single WV task.
-  results/         All artifact bundles. Each result-dir is replayable
-                    and self-describing.
+src/                Core library — all opt-in modules; the loop is
+                    composed by the demo/* runners.
+  geminiCua.js          Computer Use adapter. Owns the multi-turn
+                        functionResponse loop. Required on Gemini 3.5+:
+                        functionResponse must echo {id, name}. Denormalises
+                        the model's 0..999 coords to viewport pixels.
+                        Reads env: LIVE_TRACE, COMPLETENESS_VERIFIER,
+                        PRE_OP_CRITIC, THINKING_LEVEL.
+  playwrightEnv.js      Chromium env mapping the CU action vocab to
+                        Playwright. 60 s navigation timeout. Headless
+                        default 1280×800; headed with windowPosition for
+                        side-by-side recording. Reads env: CHROMIUM_PATH.
+  distiller.js          Canonical text-only distiller: failed trajectory
+                        + per-step intents → JSON skill {tag,title,note}.
+                        Used by §4.1 reproducibility study.
+  skillLoop.js          Baseline → fail → distill → retry-with-skill →
+                        verified keep-gate. maxRetries iteration; collects
+                        baselineTrajectory + distilledCandidates[] +
+                        retryTrajectories[] for artifact capture.
+  skillStore.js         JSON-backed skill library + substring `tag` match
+                        ([store.match()](src/skillStore.js)).
+  wvJudge.js            Faithful port of WebVoyager evaluation/auto_eval.py
+                        system + user prompt. Gemini backbone; the prompt
+                        is the evaluator. Returns SUCCESS / NOT SUCCESS.
+  completenessVerifier.js  VLAA-GUI-style verifier called by geminiCua's
+                        runTask when the model emits a 'done' turn. Tiny
+                        Gemini call with goal + final answer + final
+                        screenshot + last-5 actions. Opt-in via env var.
+  preOperativeCritic.js Voyager / GUI-Critic-R1-style critic. Fires only
+                        on actions matching the high-risk regex list
+                        (delete/send/submit/buy/checkout/login). Opt-in
+                        via env var.
+  verifier.js           Older hand-rolled verifier (URL / DOM / VLM
+                        fallback) used by the hand-curated demo/liveRun.js
+                        path. Superseded by wvJudge.js for benchmark
+                        work; kept for the older curated-task runner.
+  tasks.js              Hand-curated task fixtures (Wikipedia, GitHub,
+                        HuggingFace, …) for liveRun.js. Superseded by
+                        demo/wvRun.js for benchmark work; kept as a
+                        worked example of how to plug a new task set in.
+
+demo/                Runnable entrypoints. Each one composes src/* into
+                    a specific experiment shape.
+  mockRun.js            End-to-end loop with NO API key (mock model +
+                        mock env). Proves the control flow. `npm run demo`.
+  liveRun.js            Older hand-curated runner against live Playwright
+                        + Gemini. `npm run demo:live` (kept for backward
+                        compat; new work should use wvRun.js).
+  wvRun.js              WebVoyager runner with the official-prompt judge,
+                        triage gate, and iteration. `npm run demo:wv`.
+                        Used for Experiments A (via demo:repro), B, and
+                        the v1 win run.
+  reproducibility.js    N×baseline + N×retry on a single WV task using
+                        the kept skill from skills.json. Experiment A.
+                        Supports START_TRIAL append mode. `npm run demo:repro`.
+  recordedRun.js        Pair-condition runner (1 baseline + 1 retry,
+                        kept skill) with headed Chromium for screen
+                        recording. Experiment D. `npm run demo:recorded`.
+  fullRecordedRun.js    Iterative live-loop runner with all online
+                        interventions on (completeness verifier, pre-op
+                        critic, hybrid distiller with keyframes,
+                        strategy-category diversity prompt). Experiment C.
+                        `npm run demo:fullRecordedRun`.
+  results/              All artifact bundles. Each result-dir is replayable
+                        and self-describing.
+
+scripts/             Throwaway / utility scripts used by the recording
+                    flow and post-hoc analysis.
+  fetch-webvoyager.sh   One-shot pull of the 642 WebVoyager tasks +
+                        reference answers from upstream.
+  case-study.js         Generates a single human-readable CASE.md from
+                        a result bundle, stitching task spec + baseline
+                        trajectory + judge prose + distilled skill +
+                        distiller chain-of-thought + retry trajectory +
+                        held-out outcomes + reproducibility summary into
+                        one narrative. No API calls.
+  recapture-distillation.js
+                        Re-runs the distillation prompt on a saved
+                        baseline trajectory WITHOUT the JSON-only
+                        responseMimeType constraint, preserving the
+                        model's pre-JSON reasoning (saved to
+                        distillation-reasoning.txt in the bundle).
+                        ~$0.05 per bundle.
+  recapture-distillation-streamed.js
+                        Same as above but uses generateContentStream so
+                        a screen-recorder captures the chain-of-thought
+                        being written token-by-token in the terminal.
+                        Produced docs/skill-reasoning.mov.
+  record-while-running.sh
+                        Process-bound screen recorder. Polls for a
+                        target process via pgrep; stops via SIGINT to
+                        screencapture when the target exits. Replaces
+                        the time-bounded `screencapture -v -V SECONDS`
+                        pattern that truncated long runs.
+  open-chromium.mjs     Throwaway Chromium positioner. Opens a windowed
+                        Playwright Chromium so the user can drag/resize
+                        it, then writes its window position to
+                        /tmp/chromium-position.env every 500 ms. Used
+                        once per recording session to capture the user's
+                        chosen layout for the agent's later run.
+
+test/
+  smoke.js              Offline unit smoke — denormalise math, mock
+                        distiller, file:// Playwright, no-API-key path.
+                        `npm test`. 6 / 6 should pass.
+
+docs/
+  skill-reasoning.mov   208 KB; the user-trimmed slice of a streamed
+                        distillation recording. Cited from §3.7 and the
+                        Contributions block as evidence that the canonical
+                        distillation call is text-only.
+
+webvoyager_data/      Tasks + reference answers (gitignored; ~250 KB,
+                    fetched via scripts/fetch-webvoyager.sh).
+```
 test/
   smoke.js         Offline unit smoke.
 scripts/
