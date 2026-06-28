@@ -1,0 +1,12 @@
+{
+  "task": "ArXiv--23",
+  "baseline": {
+    "passed": false,
+    "steps": 30
+  },
+  "retry": {
+    "passed": true,
+    "steps": 19
+  },
+  "conclusion": "baseline FAIL (30 steps), retry PASS (19 steps)"
+}
