@@ -35,12 +35,17 @@ export class GeminiComputerUse {
     environment = 'browser',
     modelFn = null,
     enablePromptInjectionDetection = true,
+    // Gemini 3.5 thinking_level enum: 'MINIMAL'|'LOW'|'MEDIUM'|'HIGH'.
+    // Default 'MEDIUM'. We expose this so demo runs can dial up reasoning
+    // for higher-stakes recordings.
+    thinkingLevel = process.env.THINKING_LEVEL ?? null,
   } = {}) {
     this.apiKey = apiKey;
     this.model = model;
     this.environment = environment;
     this.modelFn = modelFn;
     this.enablePromptInjectionDetection = enablePromptInjectionDetection;
+    this.thinkingLevel = thinkingLevel;
     this._client = null;
   }
 
@@ -140,11 +145,15 @@ export class GeminiComputerUse {
     const screenshotB64 = await env.screenshot();
     let contents = this._initialContents({ goal, screenshotB64, skills });
 
+    const cfg = { tools: [tool] };
+    if (this.thinkingLevel) {
+      cfg.thinkingConfig = { thinkingLevel: this.thinkingLevel };
+    }
     for (let step = 0; step < maxSteps; step++) {
       const res = await ai.models.generateContent({
         model: this.model,
         contents,
-        config: { tools: [tool] },
+        config: cfg,
       });
 
       const candidate = res.candidates?.[0];
@@ -154,6 +163,54 @@ export class GeminiComputerUse {
       if (!fcPart) {
         // No function call -> model considers the task done (or refused).
         const text = parts.find((p) => p.text)?.text ?? '';
+
+        // VLAA-GUI completeness verifier — opt-in via env var to avoid
+        // surprising the existing tests. When on, check whether the
+        // agent's final answer is actually a complete answer; if not and
+        // there's step budget left, inject the critique into the next
+        // turn so the agent finishes instead of silently stopping.
+        if (process.env.COMPLETENESS_VERIFIER && step < maxSteps - 1) {
+          try {
+            const { verifyCompleteness } = await import('./completenessVerifier.js');
+            const lastShot = await env.screenshot();
+            const v = await verifyCompleteness({
+              apiKey: this.apiKey,
+              model: this.model,
+              goal,
+              finalAnswer: text,
+              finalScreenshotB64: lastShot,
+              recentActions: trajectory.slice(-5),
+              thinkingLevel: this.thinkingLevel,
+            });
+            if (process.env.LIVE_TRACE) {
+              process.stderr.write(
+                `\x1b[2m[completeness] complete=${v.complete}` +
+                  ` confidence=${v.confidence}` +
+                  (v.missing ? ` missing=${JSON.stringify(v.missing).slice(0, 100)}` : '') +
+                  `\x1b[0m\n`
+              );
+            }
+            if (!v.complete) {
+              // Inject the critique and let the agent take another turn.
+              contents.push({ role: 'model', parts });
+              contents.push({
+                role: 'user',
+                parts: [
+                  {
+                    text:
+                      `SYSTEM NOTE (completeness verifier): your last response is not yet a complete answer. ` +
+                      `Missing: ${v.missing}. ` +
+                      `Please finish the task and reply with a clear natural-language answer.`,
+                  },
+                ],
+              });
+              continue;
+            }
+          } catch (e) {
+            // verifier failure is non-fatal; just proceed
+          }
+        }
+
         trajectory.push({ step, action: DONE, intent: text });
         break;
       }
@@ -161,6 +218,21 @@ export class GeminiComputerUse {
       const fcId = fcPart.functionCall.id; // required on Gemini 3.5+ functionResponse
       const { action, intent } = actionFromFunctionCall(fcPart.functionCall);
       trajectory.push({ step, action, intent });
+      // LIVE_TRACE: print each step to stderr as it arrives. Useful for
+      // screen-recording the agent's reasoning alongside the browser
+      // window. Off by default to avoid noise in normal runs.
+      if (process.env.LIVE_TRACE) {
+        const argSummary = Object.entries(action)
+          .filter(([k]) => k !== 'type')
+          .slice(0, 4)
+          .map(([k, v]) => `${k}=${JSON.stringify(v).slice(0, 30)}`)
+          .join(' ');
+        process.stderr.write(
+          `\x1b[2m[step ${String(step).padStart(2, ' ')}]\x1b[0m ` +
+            `\x1b[36m${action.type}\x1b[0m ${argSummary ? '\x1b[2m' + argSummary + '\x1b[0m ' : ''}` +
+            `— ${(intent || '').slice(0, 90)}\n`
+        );
+      }
 
       // Safety acknowledgement: Gemini may attach a safety_decision to
       // the functionCall (asking us to confirm side-effecting actions).
@@ -183,6 +255,47 @@ export class GeminiComputerUse {
       const safetyAck = true;
       if (safetyRequested && this._verbose) {
         console.log('  [safety ack] ', safetyDecision?.explanation ?? '');
+      }
+
+      // Pre-operative critic on high-risk actions (Voyager/GUI-Critic-R1
+      // lineage). Opt-in via env var. Gated by isHighRisk so it doesn't
+      // fire on every step — critics are expensive.
+      if (process.env.PRE_OP_CRITIC) {
+        try {
+          const { isHighRisk, preOperativeCritic } = await import('./preOperativeCritic.js');
+          if (isHighRisk(action)) {
+            const shot = await env.screenshot();
+            const verdict = await preOperativeCritic({
+              apiKey: this.apiKey,
+              model: this.model,
+              goal,
+              proposedAction: action,
+              recentActions: trajectory.slice(-3),
+              screenshotB64: shot,
+            });
+            if (process.env.LIVE_TRACE) {
+              process.stderr.write(
+                `\x1b[2m[pre-op critic] verdict=${verdict.verdict} reason=${(verdict.reason || '').slice(0, 80)}\x1b[0m\n`
+              );
+            }
+            if (verdict.verdict === 'block') {
+              contents.push({ role: 'model', parts });
+              contents.push({
+                role: 'user',
+                parts: [
+                  {
+                    functionResponse: {
+                      ...(fcId ? { id: fcId } : {}),
+                      name: fcPart.functionCall.name,
+                      response: { error: 'pre-operative critic blocked: ' + verdict.reason },
+                    },
+                  },
+                ],
+              });
+              continue;
+            }
+          }
+        } catch {}
       }
 
       // Translate normalized coords to pixels for execution.
