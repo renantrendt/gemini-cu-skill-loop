@@ -74,15 +74,26 @@ helps and where it provably can't.
 
 ## 2. Related Work
 
-Failure-driven skill learning is an established pattern. The contribution
-here is a specific, narrow combination.
+Failure-driven skill learning is an established pattern, and **driving
+the screen is Google's own Computer Use loop** (e.g.
+`google-gemini/computer-use-preview`) — that part is not the
+contribution. What this project adds is the *combination*: a
+**training-free** loop that learns skills from the agent's **own
+failures**, with a **verified keep-gate**, in the **visual computer-use
+setting**, on the new Gemini 3.5 Flash CU stack. Related projects each
+cover a subset:
 
-| | learns from agent's own failures | GUI / computer-use | training-free | wired to Gemini 3.5 Flash CU |
-|---|:--:|:--:|:--:|:--:|
-| **EvoSkill** (arXiv 2603.02766) | ✓ | ✗ (coding) | ✓ | ✗ |
-| **CUA-Skill** (Microsoft, arXiv 2601.21123) | ✗ (curated/retrieved) | ✓ | ✓ | ✗ (Windows) |
-| **SkillRL** (arXiv 2602.08234) | ✓ | ✗ (embodied/web) | ✗ (RL) | ✗ |
-| **this work** | ✓ | ✓ | ✓ | ✓ |
+| | learns from own failures | verified keep-gate | training-free | visual / GUI | Gemini Computer Use |
+|---|:--:|:--:|:--:|:--:|:--:|
+| [EvoSkill](https://github.com/sentient-agi/EvoSkill) (arXiv 2603.02766) | ✅ | ✅ | ✅ | ❌ (coding) | ❌ |
+| [CUA-Skill](https://github.com/microsoft/cua_skill) (arXiv 2601.21123) | ❌ (curated) | ~ (recovery) | ✅ | ✅ | ❌ (Windows) |
+| [SkillRL](https://github.com/aiming-lab/SkillRL) (arXiv 2602.08234) | ✅ | ~ | ❌ (RL) | ❌ (embodied/web) | ❌ |
+| [VLAA-GUI](https://github.com/UCSC-VLAA/VLAA-GUI) | ❌ (recovery) | ✅ | ✅ | ✅ | ❌ (planner only) |
+| **this project** | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+(`~` = partial.) Implemented here: the skill distiller, the verified
+keep-gate, the skill store, and a CU adapter for the live SDK. The
+underlying Computer Use loop and the ideas above are credited.
 
 We do **not** claim "first failure→skill loop", "novel learning
 algorithm", or "beats SOTA on a benchmark." The contribution is the
