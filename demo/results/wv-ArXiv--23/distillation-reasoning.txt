@@ -1,0 +1,10 @@
+### Reasoning Summary
+
+1. **Agent Struggles**: The agent struggled with interacting with complex form elements, specifically dropdown menus and date input fields, leading to repeated failed attempts to select options and clear text.
+2. **Wasted Steps**: Wasted steps occurred due to inefficient keyboard navigation attempts (e.g., pressing 'a' repeatedly, using arrow keys) and failing to clear input fields properly before typing.
+3. **Better Approach**: Constructing the search query directly via the URL parameters is much faster and less error-prone than manually interacting with multiple finicky form fields on ArXiv.
+4. **Durable Lesson**: When dealing with search engines that expose query parameters in the URL, constructing and navigating directly to the target URL is highly reliable and bypasses UI interaction issues.
+
+```json
+{"tag":"url-direct-search","title":"Bypass Complex Forms via URL Construction","note":"When performing advanced searches on platforms like ArXiv, construct and navigate directly to the query URL instead of manually interacting with complex dropdowns and date fields."}
+```

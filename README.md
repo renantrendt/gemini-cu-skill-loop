@@ -445,6 +445,36 @@ All artifacts (trajectories, distilled skills, judge reasoning,
 screenshots, per-trial summaries) land under
 [`demo/results/`](demo/results/) — same paths linked from this paper.
 
+### Reading the reasoning trace
+
+Every result bundle preserves four layers of model reasoning:
+
+1. **Agent intents** — natural-language explanation attached to every
+   Computer Use action (`trajectory[].intent` in `baseline.json`,
+   `retry*.json`, and every `heldout-*/result.json`).
+2. **Judge reasoning** — WebVoyager's auto-evaluator's prose verdict
+   for each grading call (`judge.reasoning` in the same files).
+3. **Distilled skill** — final structured JSON
+   (`distilled-skill*.json`), plus the exact agent-intents the
+   distiller saw at the moment it wrote the skill (`fromIntents`).
+4. **Distiller chain-of-thought** (recaptured) — the model's
+   pre-JSON reasoning explaining *why* it chose the skill it chose.
+   Recaptured separately because the live distillation call uses
+   `responseMimeType=application/json` which suppresses prose. Saved
+   to [`demo/results/<bundle>/distillation-reasoning.txt`](demo/results/wv-ArXiv--23/distillation-reasoning.txt).
+   Regenerate with `node --env-file=.env scripts/recapture-distillation.js <bundle>`.
+
+For a single linear narrative per task — stitching all four layers and
+the held-out outcomes into one readable doc — see the auto-generated
+case studies:
+
+- **[demo/results/wv-ArXiv--23/CASE.md](demo/results/wv-ArXiv--23/CASE.md)** — the win
+- **[demo/results/wv-Apple--0/CASE.md](demo/results/wv-Apple--0/CASE.md)** — the ceiling
+
+Re-generate from artifacts with `node scripts/case-study.js <bundle>`
+([`scripts/case-study.js`](scripts/case-study.js)). No API calls, no
+secrets needed.
+
 ### Repository layout
 
 ```

@@ -1,0 +1,10 @@
+### Reasoning Summary
+
+1. **Agent Struggle**: The agent struggled to navigate the highly dynamic and nested Apple Store configuration interface, getting lost in excessive scrolling and micro-interactions.
+2. **Wasted Steps**: Wasted steps originated from repeatedly scrolling up and down the configuration panel and attempting to edit individual memory and storage options manually.
+3. **Better Approach**: A more efficient approach would be to navigate directly to Apple's dedicated "Compare" page or use the high-level model selection grid, which displays base prices and specs side-by-side.
+4. **Transferable Lesson**: When comparing product variants on e-commerce sites, prioritize using built-in comparison tools or high-level overview pages rather than entering deep, individual customization funnels.
+
+```json
+{"tag":"e-commerce-product-comparison","title":"Use Comparison Tools Over Manual Configuration","note":"When comparing product models, look for dedicated comparison pages or high-level overview grids. Avoid entering deep customization funnels where excessive scrolling and manual option selection waste steps."}
+```
