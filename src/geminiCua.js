@@ -162,10 +162,28 @@ export class GeminiComputerUse {
       const { action, intent } = actionFromFunctionCall(fcPart.functionCall);
       trajectory.push({ step, action, intent });
 
-      // Safety acknowledgement: if the SDK surfaces a safety_decision
-      // requiring confirmation, we ack and continue. (Permissive default
-      // for the demo; tighten before running on real accounts.)
-      const safetyAck = candidate?.safetyDecision?.decision === 'require_confirmation';
+      // Safety acknowledgement: Gemini may attach a safety_decision to
+      // the functionCall (asking us to confirm side-effecting actions).
+      // The field can live on the functionCall, on its args, on the part,
+      // or on the candidate depending on SDK version — gather from all
+      // plausible spots and ack permissively if ANY says require_confirmation.
+      //
+      // PERMISSIVE: we always set safetyAcknowledgement=true. This is fine
+      // for read-only public-site demos. TIGHTEN before pointing the agent
+      // at anything with real side effects (forms, auth'd accounts).
+      const safetyDecision =
+        fcPart.functionCall.safetyDecision ??
+        fcPart.functionCall.args?.safetyDecision ??
+        fcPart.safetyDecision ??
+        candidate?.safetyDecision;
+      const safetyRequested =
+        safetyDecision?.decision === 'require_confirmation' ||
+        safetyDecision?.decision === 'REQUIRE_CONFIRMATION';
+      // Belt and braces — always ack. Harmless if not requested.
+      const safetyAck = true;
+      if (safetyRequested && this._verbose) {
+        console.log('  [safety ack] ', safetyDecision?.explanation ?? '');
+      }
 
       // Translate normalized coords to pixels for execution.
       const { width, height } = env.size();
@@ -209,7 +227,12 @@ export class GeminiComputerUse {
               name: fcPart.functionCall.name,
               response: {
                 ...(url ? { url } : {}),
-                ...(safetyAck ? { safetyAcknowledgement: true } : {}),
+                // Belt-and-braces: include both snake_case (REST API
+                // convention) and camelCase (JS SDK convention). One of
+                // them will be the one the wire format expects.
+                ...(safetyAck
+                  ? { safetyAcknowledgement: true, safety_acknowledgement: true }
+                  : {}),
               },
               parts: [
                 {

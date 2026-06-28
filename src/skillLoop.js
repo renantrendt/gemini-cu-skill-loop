@@ -14,7 +14,8 @@ export async function runWithSkillLearning({ agent, env, goal, store, verify, di
   const matched = store.match(goal);
 
   // 1) Baseline attempt, using any skills already known for this task family.
-  let traj = await agent.runTask({ goal, env, skills: matched });
+  const baselineTrajectory = await agent.runTask({ goal, env, skills: matched });
+  let traj = baselineTrajectory;
   let passed = await verify(env, traj);
 
   const result = {
@@ -23,6 +24,10 @@ export async function runWithSkillLearning({ agent, env, goal, store, verify, di
     passedAfterSkill: passed,
     attempts: 1,
     skillLearned: null,
+    // For artifact capture / replay. Filled regardless of outcome.
+    baselineTrajectory,
+    distilledCandidates: [], // even ones not kept by the verified gate
+    retryTrajectories: [],   // one per retry attempt
   };
   if (passed) return result;
 
@@ -31,9 +36,11 @@ export async function runWithSkillLearning({ agent, env, goal, store, verify, di
   for (let r = 0; r < maxRetries; r++) {
     if (env.reset) await env.reset();
     const candidate = await distill({ goal, trajectory: traj, priorSkills: matched });
+    result.distilledCandidates.push(candidate);
 
     const retryTraj = await agent.runTask({ goal, env, skills: [...matched, candidate] });
     const retryPassed = await verify(env, retryTraj);
+    result.retryTrajectories.push(retryTraj);
     result.attempts += 1;
 
     if (retryPassed) {

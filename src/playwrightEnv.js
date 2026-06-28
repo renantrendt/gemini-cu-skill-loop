@@ -20,7 +20,10 @@ export async function createBrowserEnv({
   const browser = await chromium.launch({ headless, slowMo });
   const context = await browser.newContext({ viewport });
   const page = await context.newPage();
-  await page.goto(startUrl, { waitUntil: 'domcontentloaded' });
+  // Heavy sites (Apple, Booking) routinely exceed the 30s default; 60s
+  // is the safe upper bound that still fails fast on dead URLs.
+  page.setDefaultNavigationTimeout(60_000);
+  await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
 
   let _url = page.url();
   page.on('framenavigated', (f) => {
@@ -77,7 +80,7 @@ export async function createBrowserEnv({
       }
       case 'navigate':
       case 'goto':
-        await page.goto(action.url, { waitUntil: 'domcontentloaded' });
+        await page.goto(action.url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
         break;
       case 'go_back':
         await page.goBack({ waitUntil: 'domcontentloaded' });
