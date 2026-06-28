@@ -262,20 +262,61 @@ Triage logic: [`demo/wvRun.js`](demo/wvRun.js) → `triageFailure`.
 
 ### 3.6 Tasks (verbatim from WebVoyager `data/WebVoyager_data.jsonl`)
 
-The "Prompt as sent to the agent" wraps WebVoyager's verbatim `ques`
-field with a fixed suffix asking the agent to produce a natural-language
-final answer (WebVoyager's reference agent emits `Action: ANSWER; [...]`;
-our agent ends its turn by returning text without a function call). The
-WV ground-truth field in `data/reference_answer.json` is the
-benchmark's reference for the LLM judge; we do not consume it as a
-hand-rolled verifier.
+We take each WebVoyager task's `ques` field **byte-verbatim** and
+**append a small fixed suffix** before sending it to the agent. The
+suffix asks for a natural-language final answer — WebVoyager's
+reference agent emits `Action: ANSWER; [...]` as a sentinel; our
+agent ends its turn by returning text without a function call, so we
+nudge it to make that text a real answer instead of *"done"*. The WV
+ground-truth field in `data/reference_answer.json` is the benchmark's
+reference for the LLM judge; **we do not consume it as a hand-rolled
+verifier**.
 
-| ID | Prompt (WebVoyager `ques`) | Start URL | Modified? |
+#### What gets appended — the two suffix variants
+
+There are two variants of the suffix. The canonical one is used by
+Experiments A, B, and D (`demo/wvRun.js`, `demo/reproducibility.js`,
+`demo/recordedRun.js`). An extended version is used by Experiment C
+(`demo/fullRecordedRun.js`) because the iterative run produced
+empirically-relevant failure modes around macOS shortcuts.
+
+**Canonical suffix** ([`demo/wvRun.js:129-135`](demo/wvRun.js)):
+
+```
+<verbatim WebVoyager ques>
+
+When you have the answer, finish your turn by writing the answer in
+natural language (name + the specific values the task asked for).
+Don't just say 'done'.
+```
+
+**Extended suffix — Experiment C only** ([`demo/fullRecordedRun.js:73-77`](demo/fullRecordedRun.js)):
+
+```
+<verbatim WebVoyager ques>
+
+Environment: this browser is running on macOS — use Cmd+key (not Ctrl+key)
+for keyboard shortcuts. Note: the browser's find-in-page UI lives in the
+browser chrome above the page, so it is NOT visible in your screenshots.
+
+When you have the answer, finish your turn by writing the answer in
+natural language (name + the specific values the task asked for).
+Don't just say 'done'.
+```
+
+The two extra sentences in Experiment C were added after a v1 of the
+iterative loop produced 3 successive Cmd+F-flavoured skills that the
+agent could not execute (find-in-page renders in browser chrome that
+Playwright's screenshots don't capture — §5.4). They're informational
+hints, not skill content; the diversity prompt at the distiller layer
+is what actually forces strategy categories apart across iterations.
+
+| ID | WebVoyager `ques` (verbatim) | Start URL | Suffix used |
 |---|---|---|---|
-| `ArXiv--23` (win) | *"Determine how many articles with the keyword 'autonomous vehicles' were published in the 'Electrical Engineering and Systems Science' section of ArXiv yesterday."* | `https://arxiv.org/` | Verbatim + answer-format suffix |
-| `ArXiv--29` (held-out) | *"On ArXiv, search for papers with 'Neural Network Optimization' in the title published in 2023, and provide the number of such papers."* | `https://arxiv.org/` | Verbatim + answer-format suffix |
-| `ArXiv--31` (held-out) | *"Search ArXiv for papers with 'Graph Neural Networks' in the abstract that were submitted between Jan 1, 2024, and Jan 3, 2024, and determine how many of these papers have more than five authors."* | `https://arxiv.org/` | Verbatim + answer-format suffix |
-| `Apple--0` (ceiling) | *"Compare the prices of the latest models of MacBook Air available on Apple's website."* | `https://www.apple.com/` | Verbatim + answer-format suffix |
+| `ArXiv--23` (win) | *"Determine how many articles with the keyword 'autonomous vehicles' were published in the 'Electrical Engineering and Systems Science' section of ArXiv yesterday."* | `https://arxiv.org/` | Canonical (Experiments A/D), Extended (Experiment C) |
+| `ArXiv--29` (held-out) | *"On ArXiv, search for papers with 'Neural Network Optimization' in the title published in 2023, and provide the number of such papers."* | `https://arxiv.org/` | Canonical |
+| `ArXiv--31` (held-out) | *"Search ArXiv for papers with 'Graph Neural Networks' in the abstract that were submitted between Jan 1, 2024, and Jan 3, 2024, and determine how many of these papers have more than five authors."* | `https://arxiv.org/` | Canonical |
+| `Apple--0` (ceiling) | *"Compare the prices of the latest models of MacBook Air available on Apple's website."* | `https://www.apple.com/` | Canonical |
 
 ### 3.7 Skill loop
 
