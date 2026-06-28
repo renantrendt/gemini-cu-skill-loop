@@ -412,6 +412,62 @@ pretend it can. The verified keep-gate isn't just a nice-to-have; on
 mechanics-bound tasks it is the difference between a self-correcting
 library and a slowly-poisoned one.
 
+### 5.5 Iterative loop — what diversity bought us and what it didn't
+
+A second recorded run on the same `ArXiv--23` task, with **5-iteration
+loop**, **strategy-category diversity prompt**, **completeness verifier
+on `done`**, **pre-operative critic on high-risk actions**, **hybrid
+distiller with screenshots**, and **`HIGH` thinking on both agent and
+distiller**. Full bundle: [`demo/results/full-recorded-ArXiv--23/`](demo/results/full-recorded-ArXiv--23/).
+Recording (88 MB, 12 m) lives locally on the recorder's Desktop, not
+committed.
+
+**What worked: the basin-of-attraction is broken.** A v1 attempt (no
+diversity prompt) produced three successive iterations all in the
+*keyboard-shortcut* (Cmd+F) category — the loop refined within the
+basin and never pivoted. The v2 run, with the diversity prompt that
+tells iteration k+1's distiller *"avoid categories already tried"*,
+produced three genuinely different strategy categories:
+
+| Iter | Category | Title |
+|---|---|---|
+| 1 | `form-filling` | *Searching ArXiv by Specific Date* |
+| 2 | `url-construction` | *Searching ArXiv via URL Construction* |
+| 3 | `scroll-and-read` | *Counting Recent Publications via Sorted Results* |
+
+The loop detector did its job. The v1 → v2 difference is the cleanest
+empirical demonstration in this repo of *why a structural fix at the
+distiller-prompt layer matters more than another LLM call*.
+
+**What didn't work — the next architectural layer.** All three v2
+iterations still failed verification. Two layered failure modes:
+
+1. **Skill non-adherence**. Iteration 2's skill explicitly said
+   *"construct URL with `date-filter_by=date_range&date-from_date=...`"*.
+   The agent's actual trajectory went back to clicking form inputs
+   ([retry-iter2.json](demo/results/full-recorded-ArXiv--23/retry-iter2.json):
+   steps 0-5 are clicks on the search box and field dropdown), and
+   ended on a URL with `date-filter_by=all_dates` — the page default,
+   not the skill's prescription. The skill was right; the agent didn't
+   execute it precisely.
+2. **Completeness verifier was too permissive**. It returned
+   `complete=true, confidence=1` for an agent answer of *"Click on
+   sort dropdown"* — clearly not a count of articles. The verifier
+   was likely judging the *page state* (which showed search results)
+   as the answer, instead of checking that the agent's *text*
+   contains the specific value. Calibration regression: the prompt's
+   *"if the final answer is an action description, answer
+   complete=false"* directive needs sharper grounding (probably a
+   structured "extract the numeric answer from the text" sub-step).
+
+The result is honest: **strategy-level diversity is a real, measurable
+win; precise execution and verifier calibration are the next layers
+this loop will have to attack**. That maps cleanly to the SOTA gap —
+mid-trajectory reflection ([Agent S2](https://arxiv.org/abs/2504.00906),
+[OSCAR](https://arxiv.org/abs/2410.18963), [GUI-Reflection](https://arxiv.org/abs/2506.08012)),
+and DOM-grounded action validation ([UI-TARS](https://arxiv.org/abs/2501.12326)),
+which we did not yet implement.
+
 ### 5.4 Threats to validity
 
 - **Single-task headline.** One WebVoyager task family produced the
