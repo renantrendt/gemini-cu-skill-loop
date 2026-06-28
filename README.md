@@ -58,8 +58,11 @@ helps and where it provably can't.
    matching `{id, name}` on Gemini 3.5+ — is documented in
    [`src/geminiCua.js`](src/geminiCua.js)).
 2. A failure-driven skill distiller that operates on per-step **action +
-   intent** text (no screenshots in the distillation call) and emits
-   structured JSON skills (`{tag, title, note}`).
+   intent** text and emits structured JSON skills
+   (`{tag, title, note}`). The distillation call is **text-only** — see
+   §3.7 and the screen recording at
+   [`docs/skill-distillation-arxiv23.mov`](docs/skill-distillation-arxiv23.mov)
+   for the full input + streamed output.
 3. A **verified keep-gate**: a skill is persisted only if the retry that
    used it passes the benchmark's evaluator.
 4. End-to-end reproducible artifact bundles per task — task spec,
@@ -211,9 +214,13 @@ hand-rolled verifier.
 2. On a triaged failure, the distiller (`gemini-3.5-flash`) reads the
    failed trajectory as plain text — each step's action type + args +
    the per-step `intent` string Gemini Computer Use already emits.
-   **No screenshots in the distillation call.** Output is a single JSON
-   object `{tag, title, note}`. Prompt:
-   [`src/distiller.js`](src/distiller.js).
+   **The distillation call is text-only; no screenshots are passed in.**
+   Output is a single JSON object `{tag, title, note}`. Prompt:
+   [`src/distiller.js`](src/distiller.js). Evidence: the
+   [screen recording at `docs/skill-distillation-arxiv23.mov`](docs/skill-distillation-arxiv23.mov)
+   captures one full distillation end-to-end — input prompt + streamed
+   chain-of-thought + emitted JSON skill — running in a fresh Terminal
+   with no screenshots in scope.
 3. Retry with the skill prepended to the goal as text (see
    [`src/geminiCua.js`](src/geminiCua.js), `_initialContents`) → grade.
 4. **Keep-gate**: a candidate skill is persisted to
@@ -495,7 +502,7 @@ src/
   playwrightEnv.js  Headless Chromium env mapping the CU action vocab to
                     Playwright. 60s navigation timeout, viewport 1280x800.
   distiller.js      Failed trajectory text -> JSON skill {tag,title,note}.
-                    No screenshots passed to the distiller.
+                    (Distillation call is text-only; see README §3.7.)
   wvJudge.js        Byte-faithful port of WebVoyager auto_eval.py prompt.
                     Gemini backbone; the prompt IS the evaluator.
   skillLoop.js      Baseline -> fail -> distill -> retry-with-skill ->
