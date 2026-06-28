@@ -44,6 +44,7 @@ const HEADLESS = !!process.env.HEADLESS;
 const SAVE_RESULTS = !!process.env.SAVE_RESULTS;
 const SKILL_LOOP = !!process.env.SKILL_LOOP;
 const MAX_STEPS = Number(process.env.MAX_STEPS ?? 25);
+const MAX_RETRIES = Number(process.env.MAX_RETRIES ?? 1);
 const argId = process.argv[2];
 
 // Curated subset: login-free, real-time-stable enough for one run, with
@@ -69,9 +70,41 @@ const FAMILIES = {
   // MacBook Air pricing, Apple--2/3 are iPhone Pro/Pro-Max comparisons.
   // Different products + different spec dimensions = honest generalisation
   // test that the distilled skill doesn't just memorise MacBook Air coords.
+  // NOTE: Apple--0 is the canonical "mechanics-bound" CU failure case —
+  // even with the right strategy skill, the agent can't operate Apple's
+  // custom JS dropdowns. Kept as the honest "ceiling" exhibit, not for
+  // hunting wins.
   'Apple--0':      { family: 'apple-compare-models', primary: true,  heldOut: ['Apple--2', 'Apple--3'] },
   'Apple--2':      { family: 'apple-compare-models', primary: false, heldOutOf: 'Apple--0' },
   'Apple--3':      { family: 'apple-compare-models', primary: false, heldOutOf: 'Apple--0' },
+
+  // GitHub multi-qualifier repo search template — STRATEGY-fixable.
+  // Native <input type="search">, no custom widgets. Failure mode = agent
+  // keyword-searches "python repo past 2 days 500 stars" as a phrase
+  // instead of using GitHub's qualifier syntax
+  //   language:python stars:>500 pushed:>YYYY-MM-DD
+  // A distilled note that names the syntax pattern is exactly the kind
+  // of strategy skill the text distiller CAN write and the model CAN
+  // execute (qualifier strings go into the same native input).
+  'GitHub--5':     { family: 'gh-repo-search', primary: true,  heldOut: ['GitHub--15', 'GitHub--19'] },
+  'GitHub--15':    { family: 'gh-repo-search', primary: false, heldOutOf: 'GitHub--5' },
+  'GitHub--19':    { family: 'gh-repo-search', primary: false, heldOutOf: 'GitHub--5' },
+  'GitHub--17':    { family: 'gh-repo-search', primary: false, heldOutOf: 'GitHub--5' },
+
+  // ArXiv advanced-search-with-date-filter template. Native form controls
+  // (real <select>, real <input type="date">, native checkbox grid for
+  // subject sections). Failure mode = agent searches the keyword but
+  // omits the DATE filter, returning all-time results when the task asks
+  // for a date-bounded count. Pure strategy: a skill that says
+  //   "ArXiv advanced search: set the date filter BEFORE clicking Search;
+  //    the result count appears at the top of the result page"
+  // should generalise across:
+  //   ArXiv--23 (keyword + section + 'yesterday')
+  //   ArXiv--29 (title + year 2023)
+  //   ArXiv--31 (abstract + specific date range)
+  'ArXiv--23':     { family: 'arxiv-advanced-date', primary: true,  heldOut: ['ArXiv--29', 'ArXiv--31'] },
+  'ArXiv--29':     { family: 'arxiv-advanced-date', primary: false, heldOutOf: 'ArXiv--23' },
+  'ArXiv--31':     { family: 'arxiv-advanced-date', primary: false, heldOutOf: 'ArXiv--23' },
 };
 
 // Load WebVoyager data ----------------------------------------------------
@@ -103,7 +136,7 @@ function wrapGoal(rawGoal) {
 
 // Triage helper — flags reported failures that smell like one of the
 // known false-failure modes (auth wall, alt path, safety, harness).
-function triageFailure({ trajectory, finalUrl, error }) {
+function triageFailure({ trajectory, finalUrl, error, judgeReasoning }) {
   if (error && /safety decision/i.test(error)) return { real: false, reason: 'safety-ack bug (harness)' };
   if (error) return { real: false, reason: `harness error: ${error.slice(0, 120)}` };
   const intents = (trajectory ?? []).map((t) => (t.intent ?? '').toLowerCase()).join(' | ');
@@ -113,6 +146,13 @@ function triageFailure({ trajectory, finalUrl, error }) {
     return { real: false, reason: 'captcha / bot challenge' };
   if (finalUrl && /login|signin|accounts\.google|auth/.test(finalUrl))
     return { real: false, reason: 'final URL is an auth page' };
+  // Rate-limit / temporary block: the agent's strategy may have been
+  // sound but the site returned a 429-class block before the verifier
+  // could read the success state. The judge graded a rate-limit page,
+  // not the agent's work. Treat as harness.
+  const ratelimitText = (judgeReasoning ?? '') + ' ' + intents;
+  if (/rate limit|too many requests|429|exceeded.*requests/i.test(ratelimitText))
+    return { real: false, reason: 'site rate-limit (harness)' };
   return { real: true };
 }
 
@@ -169,6 +209,7 @@ async function judgeAndTriage(task, runOut) {
       trajectory: runOut.traj,
       finalUrl: runOut.finalUrl,
       error: runOut.error,
+      judgeReasoning: j.reasoning,
     });
   }
   return { judge: j, triage };
@@ -211,38 +252,62 @@ for (const id of idsToRun) {
 
   // 2) Skill loop branch — only if we have a real triaged failure ---------
   if (!SKILL_LOOP || judge.passed || !triage.real) continue;
-  console.log('--- skill loop on real triaged failure ---');
+  console.log(`--- skill loop on real triaged failure (max retries = ${MAX_RETRIES}) ---`);
 
-  // Distill from the baseline failure trajectory
-  const candidate = await distiller({
-    goal: task.ques,
-    trajectory: baseline.traj,
-    priorSkills: store.match(task.ques),
-  });
-  if (SAVE_RESULTS) saveJSON(`${outDir}/distilled-skill.json`, candidate);
-  console.log(`distilled: [${candidate.tag}] ${candidate.title}`);
+  // Iterate: distill -> retry -> judge. Each iteration feeds the LATEST
+  // failed trajectory (and the prior skills tried) into the distiller so
+  // a second/third skill can address gaps the first one left open.
+  let priorTraj = baseline.traj;
+  let priorSkills = [];
+  let retry = null;
+  let retryGrade = null;
+  let stored = null;
+  const candidates = [];
 
-  const retry = await runSingle(task, [candidate]);
-  const retryGrade = await judgeAndTriage(task, retry);
-  console.log(`retry judge: ${retryGrade.judge.passed ? 'SUCCESS' : 'NOT SUCCESS'}`);
-
-  if (SAVE_RESULTS) {
-    saveJSON(`${outDir}/retry.json`, {
-      passed: retryGrade.judge.passed,
-      finalAnswer: retry.finalAnswer,
-      finalUrl: retry.finalUrl,
-      trajectory: retry.traj,
-      judge: { passed: retryGrade.judge.passed, reasoning: retryGrade.judge.reasoning },
+  for (let r = 0; r < MAX_RETRIES; r++) {
+    const candidate = await distiller({
+      goal: task.ques,
+      trajectory: priorTraj,
+      priorSkills,
     });
-    savePNG(`${outDir}/retry-final.png`, retry.finalShotB64);
+    candidates.push(candidate);
+    console.log(`  [retry ${r + 1}/${MAX_RETRIES}] distilled: [${candidate.tag}] ${candidate.title}`);
+
+    retry = await runSingle(task, [...priorSkills, candidate]);
+    retryGrade = await judgeAndTriage(task, retry);
+    console.log(`  [retry ${r + 1}/${MAX_RETRIES}] judge: ${retryGrade.judge.passed ? 'SUCCESS' : 'NOT SUCCESS'}`);
+
+    if (SAVE_RESULTS) {
+      const suffix = MAX_RETRIES === 1 ? '' : `-${r + 1}`;
+      saveJSON(`${outDir}/distilled-skill${suffix}.json`, candidate);
+      saveJSON(`${outDir}/retry${suffix}.json`, {
+        retryIndex: r + 1,
+        passed: retryGrade.judge.passed,
+        finalAnswer: retry.finalAnswer,
+        finalUrl: retry.finalUrl,
+        trajectory: retry.traj,
+        judge: { passed: retryGrade.judge.passed, reasoning: retryGrade.judge.reasoning },
+        skillsAppliedSoFar: [...priorSkills, candidate].map((s) => ({ tag: s.tag, title: s.title })),
+      });
+      savePNG(`${outDir}/retry-final${suffix}.png`, retry.finalShotB64);
+    }
+    results.push({ id: `${id}#retry${r + 1}`, retry: retryGrade.judge.passed });
+
+    if (retryGrade.judge.passed) {
+      // Verified keep-gate: persist the FULL skill chain that fixed it.
+      // The last candidate is the one that pushed it over the line, but
+      // the chain matters for replaying the fix.
+      stored = store.add({ id: 'wv-' + Date.now(), ...candidate });
+      console.log(`  kept skill (verified): ${stored.id}`);
+      break;
+    }
+    // Failed again. Carry the retry's trajectory + the rejected candidate
+    // forward so the next distillation sees the gap.
+    priorTraj = retry.traj;
+    priorSkills = [...priorSkills, candidate];
   }
-  results.push({ id: `${id}#retry`, retry: retryGrade.judge.passed });
 
-  // Verified keep-gate: persist skill iff retry passed
-  if (retryGrade.judge.passed) {
-    const stored = store.add({ id: 'wv-' + Date.now(), ...candidate });
-    console.log(`kept skill (verified): ${stored.id}`);
-
+  if (stored) {
     // 3) Held-out instances of the same template -------------------------
     const heldIds = FAMILIES[id]?.heldOut ?? [];
     for (const hId of heldIds) {
