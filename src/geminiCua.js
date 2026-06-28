@@ -158,6 +158,7 @@ export class GeminiComputerUse {
         break;
       }
 
+      const fcId = fcPart.functionCall.id; // required on Gemini 3.5+ functionResponse
       const { action, intent } = actionFromFunctionCall(fcPart.functionCall);
       trajectory.push({ step, action, intent });
 
@@ -185,6 +186,7 @@ export class GeminiComputerUse {
           parts: [
             {
               functionResponse: {
+                ...(fcId ? { id: fcId } : {}),
                 name: fcPart.functionCall.name,
                 response: { error: String(e?.message ?? e) },
               },
@@ -203,6 +205,7 @@ export class GeminiComputerUse {
         parts: [
           {
             functionResponse: {
+              ...(fcId ? { id: fcId } : {}),
               name: fcPart.functionCall.name,
               response: {
                 ...(url ? { url } : {}),
